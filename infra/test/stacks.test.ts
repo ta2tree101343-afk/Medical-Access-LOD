@@ -29,7 +29,12 @@ function build(): {
     readModelTable: storage.readModelTable,
     ecrRepository: storage.ecrRepository,
   });
-  const api = new ApiStack(app, 'Api', { env, envName: 'dev', readModelTable: storage.readModelTable });
+  const api = new ApiStack(app, 'Api', {
+    env,
+    envName: 'dev',
+    readModelTable: storage.readModelTable,
+    ecrRepository: storage.ecrRepository,
+  });
   const monitoring = new MonitoringStack(app, 'Monitoring', {
     env,
     envName: 'dev',

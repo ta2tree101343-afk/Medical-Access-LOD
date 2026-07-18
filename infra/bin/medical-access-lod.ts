@@ -42,6 +42,7 @@ const api = new ApiStack(app, `${prefix}-Api`, {
   env,
   envName,
   readModelTable: storage.readModelTable,
+  ecrRepository: storage.ecrRepository,
 });
 
 new MonitoringStack(app, `${prefix}-Monitoring`, {
