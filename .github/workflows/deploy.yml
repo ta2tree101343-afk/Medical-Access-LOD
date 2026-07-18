@@ -1,0 +1,109 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Environment (dev / stg / prod)'
+        type: string
+        default: dev
+      github_owner:
+        description: 'GitHub owner (OIDC trust condition)'
+        type: string
+        default: ta2tree101343-afk
+      github_repo:
+        description: 'GitHub repo (OIDC trust condition)'
+        type: string
+        default: Medical-Access-LOD
+
+concurrency:
+  group: deploy-${{ inputs.env }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+
+jobs:
+  deploy:
+    name: Build image + CDK deploy + publish lod/
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      # aws-actions/configure-aws-credentials v4.0.2
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-medical-access-lod-${{ inputs.env }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # aws-actions/amazon-ecr-login v2.0.1
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076
+
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ENV_NAME: ${{ inputs.env }}
+        run: |
+          REPO="$REGISTRY/medical-access-lod-$ENV_NAME-pipeline"
+          docker build --platform linux/arm64 -t "$REPO:latest" .
+          for TAG in download normalize buildrdf validate publish buildreadmodel; do
+            docker tag "$REPO:latest" "$REPO:$TAG"
+            docker push "$REPO:$TAG"
+          done
+          docker push "$REPO:latest"
+
+      # actions/setup-node v4.1.0
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK deps
+        working-directory: infra
+        run: npm ci
+
+      - name: CDK deploy
+        working-directory: infra
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+          ENV_NAME: ${{ inputs.env }}
+          GH_OWNER: ${{ inputs.github_owner }}
+          GH_REPO: ${{ inputs.github_repo }}
+        run: |
+          npx cdk deploy --all --require-approval never \
+            -c env="$ENV_NAME" \
+            -c githubOwner="$GH_OWNER" \
+            -c githubRepo="$GH_REPO"
+
+      - name: Sync lod/ to dist bucket
+        env:
+          ENV_NAME: ${{ inputs.env }}
+        run: |
+          aws s3 sync lod/ "s3://medical-access-lod-$ENV_NAME-dist/latest/" \
+            --delete \
+            --cache-control "public, max-age=3600" \
+            --exclude "*.md"
+
+      - name: Invalidate CloudFront cache
+        env:
+          DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          if [ -n "$DISTRIBUTION_ID" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "$DISTRIBUTION_ID" \
+              --paths "/latest/*"
+          else
+            echo "CLOUDFRONT_DISTRIBUTION_ID secret not set; skipping invalidation."
+          fi

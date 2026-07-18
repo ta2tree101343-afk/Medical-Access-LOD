@@ -35,6 +35,31 @@ npx cdk diff        # 現行環境との差分
 npx cdk deploy --all --require-approval never  # デプロイ
 ```
 
+## GitHub Actions からデプロイ
+
+`.github/workflows/deploy.yml` を `workflow_dispatch` で実行すると、
+OIDC で IdentityStack の Role を assume してデプロイまで自動化される。
+
+### 初回セットアップ (手動)
+
+1. AWS アカウントで `npx cdk bootstrap aws://<account>/ap-northeast-1`
+2. 初回のみ IAM ロール認証で `npx cdk deploy MedicalAccessLod-dev-Identity`
+   （GitHub OIDC Provider + Deploy Role を作成）
+3. GitHub リポジトリの **Environments** (`dev` / `stg` / `prod`) に以下を登録:
+   - `AWS_DEPLOY_ROLE_ARN` (IdentityStack で作成した `GithubDeployRole` の ARN)
+   - `AWS_ACCOUNT_ID`
+   - `CLOUDFRONT_DISTRIBUTION_ID` (DeliveryStack デプロイ後の Distribution ID、任意)
+
+### 実行
+
+- Actions → **Deploy** → **Run workflow** → 環境選択 (`dev` 等)
+- 動作:
+  1. OIDC で Role assume
+  2. Docker build (linux/arm64) → ECR に 6 タグで push
+  3. `cdk deploy --all` (残り 5 Stack)
+  4. `aws s3 sync lod/ → s3://medical-access-lod-<env>-dist/latest/`
+  5. CloudFront invalidation
+
 ## Context
 
 - `env` (default: `dev`) — Stack 名プレフィックスに使用
