@@ -1,0 +1,15 @@
+BASE <https://example.org/medical-access/>
+PREFIX ex: <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+SELECT ?facility ?name
+WHERE {
+    ?facility ex:offersClinicalService ?service ;
+              schema:name ?name .
+
+    ?service ex:medicalSpecialty ?concept .
+
+    ?concept skos:prefLabel "内科"@ja .
+}
+ORDER BY ?name

@@ -242,6 +242,7 @@ def publish_lod(
     lod_dir: Path = typer.Option(_REPO_ROOT / "lod"),
     shapes: Path = typer.Option(_DEFAULT_SHAPES),
     ontology: Path = typer.Option(_REPO_ROOT / "ontology" / "medical-access.ttl"),
+    queries_dir: Path = typer.Option(_DEFAULT_QUERIES_REAL),
 ) -> None:
     """実データ pipeline を lod/ へ出力し、ontology / shapes / statistics.json を揃える。"""
 
@@ -277,6 +278,11 @@ def publish_lod(
     schedules = len(list(graph.subjects(RDF.type, _SCHEMA.OpeningHoursSpecification)))
 
     manifest = json.loads((raw_dir / "manifest.json").read_text(encoding="utf-8"))
+    sparql_counts: dict[str, int] = {}
+    for query_file in sorted(queries_dir.glob("*.rq")):
+        rows = list(graph.query(query_file.read_text(encoding="utf-8")))
+        sparql_counts[query_file.stem] = len(rows)
+
     stats = {
         "generated_at": datetime.now(UTC).isoformat(),
         "source": manifest["source"],
@@ -297,6 +303,7 @@ def publish_lod(
             "clinical_services": services,
             "opening_hours": schedules,
         },
+        "sparql_result_counts": sparql_counts,
     }
     (lod_dir / "statistics.json").write_text(
         json.dumps(stats, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
