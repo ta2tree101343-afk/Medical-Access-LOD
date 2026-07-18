@@ -79,6 +79,46 @@ SELECT DISTINCT ?facility ?name ?dayOfWeek ?opens ?closes WHERE {
 }
 ```
 
+```sparql
+# 診療科カタログ (SKOSスキーム全一覧) — 82 件
+BASE <https://example.org/medical-access/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+SELECT ?code ?label WHERE {
+  ?concept skos:inScheme <concept/specialty> ;
+           skos:notation ?code ;
+           skos:prefLabel ?label .
+}
+ORDER BY ?code
+```
+
+```sparql
+# 診療科名 (label) で検索 : 「内科」 — 265 件
+# コード (1001) を知らなくても人間可読な名前で辿れる
+BASE <https://example.org/medical-access/>
+PREFIX ex: <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+SELECT ?facility ?name WHERE {
+  ?facility ex:offersClinicalService ?service ;
+            schema:name ?name .
+  ?service ex:medicalSpecialty ?concept .
+  ?concept skos:prefLabel "内科"@ja .
+}
+ORDER BY ?name
+```
+
+```sparql
+# 区別の施設数集計 — 6 件 (中央141 / 花見川87 / 美浜82 / 稲毛79 / 緑65 / 若葉55)
+BASE <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+SELECT ?ward (COUNT(DISTINCT ?facility) AS ?count) WHERE {
+  ?facility schema:address ?address .
+  ?address schema:addressLocality ?ward .
+}
+GROUP BY ?ward
+ORDER BY DESC(?count)
+```
+
 ## 免責事項
 
 本 LOD は公開データを研究・学習目的で構造化したものであり、実際の診療日時を保証しない。

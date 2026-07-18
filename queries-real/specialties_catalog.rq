@@ -1,0 +1,10 @@
+BASE <https://example.org/medical-access/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+SELECT ?code ?label
+WHERE {
+    ?concept skos:inScheme <concept/specialty> ;
+             skos:notation ?code ;
+             skos:prefLabel ?label .
+}
+ORDER BY ?code
