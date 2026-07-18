@@ -1,0 +1,27 @@
+BASE <https://example.org/medical-access/>
+PREFIX ex: <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT DISTINCT ?facility ?name ?dayOfWeek ?opens ?closes
+WHERE {
+    VALUES ?dayOfWeek {
+        schema:Monday schema:Tuesday schema:Wednesday schema:Thursday schema:Friday
+    }
+
+    ?facility schema:name ?name ;
+              schema:address ?address ;
+              ex:offersClinicalService ?service .
+
+    ?address schema:addressLocality "千葉市中央区"@ja .
+
+    ?service ex:medicalSpecialty <concept/specialty/03> ;
+             ex:hasSchedule ?schedule .
+
+    ?schedule schema:dayOfWeek ?dayOfWeek ;
+              schema:opens ?opens ;
+              schema:closes ?closes .
+
+    FILTER(STR(?opens) <= "18:00:00" && STR(?closes) > "18:00:00")
+}
+ORDER BY ?name ?dayOfWeek

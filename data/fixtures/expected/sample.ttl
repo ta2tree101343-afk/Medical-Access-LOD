@@ -1,0 +1,36 @@
+@prefix ex:     <https://example.org/medical-access/> .
+@prefix schema: <https://schema.org/> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@base           <https://example.org/medical-access/> .
+
+<resource/facility/1210000002>
+    a schema:MedicalClinic ;
+    ex:facilityId "1210000002" ;
+    schema:name "こばやし小児科クリニック"@ja ;
+    schema:address <resource/address/1210000002> ;
+    ex:offersClinicalService <resource/service/1210000002/02> .
+
+<resource/address/1210000002>
+    a schema:PostalAddress ;
+    schema:addressRegion "千葉県"@ja ;
+    schema:addressLocality "千葉市中央区"@ja ;
+    schema:streetAddress "新町4-5-6"@ja .
+
+<resource/service/1210000002/02>
+    a ex:ClinicalService ;
+    ex:medicalSpecialty <concept/specialty/02> ;
+    ex:hasSchedule <resource/schedule/1210000002/02/MON/1> ,
+                   <resource/schedule/1210000002/02/SAT/1> .
+
+<resource/schedule/1210000002/02/MON/1>
+    a schema:OpeningHoursSpecification ;
+    schema:dayOfWeek schema:Monday ;
+    schema:opens "09:00:00"^^xsd:time ;
+    schema:closes "12:00:00"^^xsd:time .
+
+<resource/schedule/1210000002/02/SAT/1>
+    a schema:OpeningHoursSpecification ;
+    schema:dayOfWeek schema:Saturday ;
+    schema:opens "09:00:00"^^xsd:time ;
+    schema:closes "13:00:00"^^xsd:time .
