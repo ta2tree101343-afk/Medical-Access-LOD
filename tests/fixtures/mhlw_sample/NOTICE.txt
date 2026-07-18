@@ -1,0 +1,9 @@
+MHLW Sample Fixture
+
+This directory contains a very small subset of rows from:
+  厚生労働省 医療情報ネットのオープンデータ
+  https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/iryou/newpage_43373.html
+  License: 公共データ利用規約 (PDL 1.0)
+
+Purpose: test-only fixture for tests/unit/test_normalize_mhlw.py.
+Retention: kept minimal (< 60 KB) for offline CI runs.

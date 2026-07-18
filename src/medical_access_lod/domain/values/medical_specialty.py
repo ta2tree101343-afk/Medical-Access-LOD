@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
 
-_CODE_PATTERN = re.compile(r"^[0-9]{2}$")
+_CODE_PATTERN = re.compile(r"^[0-9]{2,4}$")
 
 
 DISPLAY_TO_CODE: dict[str, str] = {
