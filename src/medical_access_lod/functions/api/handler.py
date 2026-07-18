@@ -14,16 +14,18 @@ from medical_access_lod.functions.shared.observability import logger, metrics, t
 
 app = APIGatewayHttpResolver()
 
-TABLE_NAME = os.environ.get("READ_MODEL_TABLE", "")
+
+def _table_name() -> str:
+    return os.environ.get("READ_MODEL_TABLE", "")
 
 
 def _table() -> Any:
-    return boto3.resource("dynamodb").Table(TABLE_NAME)
+    return boto3.resource("dynamodb").Table(_table_name())
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "table": TABLE_NAME}
+    return {"status": "ok", "table": _table_name()}
 
 
 @app.get("/metadata")
