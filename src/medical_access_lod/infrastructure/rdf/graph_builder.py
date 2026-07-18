@@ -111,8 +111,6 @@ def _add_specialty_scheme(graph: Graph, dataset: NormalizedDataset) -> None:
 
     graph.add((scheme, SKOS.prefLabel, Literal("標榜診療科", lang="ja")))
 
-    _labels = {"01": "内科", "02": "小児科", "03": "皮膚科"}
-
     used_codes = {str(s.specialty_code) for s in dataset.services}
 
     for code in sorted(used_codes):
@@ -124,8 +122,9 @@ def _add_specialty_scheme(graph: Graph, dataset: NormalizedDataset) -> None:
 
         graph.add((concept, SKOS.notation, Literal(code)))
 
-        if code in _labels:
-            graph.add((concept, SKOS.prefLabel, Literal(_labels[code], lang="ja")))
+        label = dataset.specialty_labels.get(code)
+        if label:
+            graph.add((concept, SKOS.prefLabel, Literal(label, lang="ja")))
 
 
 def _add_facility(graph: Graph, facility: Facility) -> None:

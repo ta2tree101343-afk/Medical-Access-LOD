@@ -51,3 +51,11 @@ def test_schedule_times_are_hhmmss_and_opens_before_closes() -> None:
         assert len(s.opens) == 8
         assert len(s.closes) == 8
         assert s.opens < s.closes
+
+
+def test_specialty_labels_cover_all_used_codes() -> None:
+    ds = normalize_mhlw(SAMPLE)
+    used_codes = {str(s.specialty_code) for s in ds.services}
+    for code in used_codes:
+        assert code in ds.specialty_labels, f"missing label for {code}"
+        assert ds.specialty_labels[code].strip() != ""

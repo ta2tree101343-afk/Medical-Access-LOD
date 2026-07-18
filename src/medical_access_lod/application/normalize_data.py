@@ -11,7 +11,11 @@ from medical_access_lod.domain.models.facility import Address, Facility, Facilit
 from medical_access_lod.domain.models.schedule import Schedule
 from medical_access_lod.domain.values.day_of_week import DayOfWeek
 from medical_access_lod.domain.values.facility_id import FacilityId
-from medical_access_lod.domain.values.medical_specialty import SpecialtyCode, resolve_specialty
+from medical_access_lod.domain.values.medical_specialty import (
+    CODE_TO_DISPLAY,
+    SpecialtyCode,
+    resolve_specialty,
+)
 from medical_access_lod.domain.values.time_of_day import normalize_time, split_lunch_break
 
 
@@ -22,6 +26,8 @@ class NormalizedDataset:
     services: list[ClinicalService]
 
     schedules: list[Schedule]
+
+    specialty_labels: dict[str, str]
 
 
 def _dedup_by_facility_id(rows: Iterable[dict[str, object]]) -> list[dict[str, object]]:
@@ -131,8 +137,13 @@ def normalize(
     lunch_end: str | None = None,
 ) -> NormalizedDataset:
 
+    services = normalize_services(services_csv)
+    labels = {str(s.specialty_code): CODE_TO_DISPLAY[str(s.specialty_code)]
+              for s in services
+              if str(s.specialty_code) in CODE_TO_DISPLAY}
     return NormalizedDataset(
         facilities=normalize_facilities(facilities_csv),
-        services=normalize_services(services_csv),
+        services=services,
         schedules=normalize_schedules(schedules_csv, lunch_start=lunch_start, lunch_end=lunch_end),
+        specialty_labels=labels,
     )

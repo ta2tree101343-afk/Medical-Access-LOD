@@ -34,7 +34,7 @@ _DAY_COLS: list[tuple[str, str, DayOfWeek]] = [
     ("日_診療開始時間", "日_診療終了時間", DayOfWeek.SUN),
 ]
 
-SPECIALTY_LABELS: dict[str, str] = {}
+_SPECIALTY_LABELS_SCRATCH: dict[str, str] = {}
 
 
 def _load_facility_csv(path: Path, facility_type: FacilityType) -> pl.DataFrame:
@@ -108,7 +108,7 @@ def _build_services_and_schedules(
         code = SpecialtyCode(code_str)
         label = row.get("診療科目名")
         if label:
-            SPECIALTY_LABELS.setdefault(code_str, str(label).strip())
+            _SPECIALTY_LABELS_SCRATCH.setdefault(code_str, str(label).strip())
 
         key = (str(fid), str(code))
         if key not in service_seen:
@@ -160,6 +160,7 @@ def normalize_mhlw(raw_dir: Path) -> NormalizedDataset:
     clinic_hours_df = _load_schedule_csv(clinic_hours_csv, allowed_ids)
     schedule_df = pl.concat([hospital_hours_df, clinic_hours_df], how="diagonal_relaxed")
 
+    _SPECIALTY_LABELS_SCRATCH.clear()
     facilities = _build_facilities(facility_df)
     services, schedules = _build_services_and_schedules(schedule_df)
 
@@ -169,4 +170,12 @@ def normalize_mhlw(raw_dir: Path) -> NormalizedDataset:
     covered_ids = {str(s.facility_id) for s in services}
     facilities = [f for f in facilities if str(f.facility_id) in covered_ids]
 
-    return NormalizedDataset(facilities=facilities, services=services, schedules=schedules)
+    used_codes = {str(s.specialty_code) for s in services}
+    labels = {c: label for c, label in _SPECIALTY_LABELS_SCRATCH.items() if c in used_codes}
+
+    return NormalizedDataset(
+        facilities=facilities,
+        services=services,
+        schedules=schedules,
+        specialty_labels=labels,
+    )

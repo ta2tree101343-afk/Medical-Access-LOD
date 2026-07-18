@@ -158,6 +158,13 @@ def test_specialty_scheme_has_inScheme_and_notation(graph: Graph) -> None:
         assert str(notations[0]).isdigit()
 
 
+def test_specialty_concepts_have_prefLabel(graph: Graph) -> None:
+    scheme = URIRef(f"{BASE}concept/specialty")
+    for concept in graph.subjects(SKOS.inScheme, scheme):
+        labels = list(graph.objects(concept, SKOS.prefLabel))
+        assert labels, f"no prefLabel on {concept}"
+
+
 def test_turtle_roundtrip(graph: Graph, tmp_path: Path) -> None:
 
     ttl = tmp_path / "out.ttl"
