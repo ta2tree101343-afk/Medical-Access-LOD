@@ -16,6 +16,7 @@ from medical_access_lod.application.download_source import (
     download as download_source,
 )
 from medical_access_lod.application.normalize_data import normalize
+from medical_access_lod.application.normalize_mhlw import normalize_mhlw
 from medical_access_lod.application.validate_rdf import validate_turtle
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -29,6 +30,8 @@ _DEFAULT_RAW = _REPO_ROOT / "data" / "raw"
 _DEFAULT_OUT = _REPO_ROOT / "data" / "build" / "latest"
 
 _DEFAULT_QUERIES = _REPO_ROOT / "queries"
+
+_DEFAULT_QUERIES_REAL = _REPO_ROOT / "queries-real"
 
 _DEFAULT_SHAPES = _REPO_ROOT / "ontology" / "shapes.ttl"
 
@@ -175,6 +178,53 @@ def pipeline(
         typer.echo(f"[query] {query_file.name}: {len(rows)} row(s)")
 
     typer.echo("[pipeline] done")
+
+
+@app.command(name="pipeline-real")
+def pipeline_real(
+    snapshot_date: str = typer.Option(
+        DEFAULT_SNAPSHOT_DATE, help="data/raw/<snapshot_date>/ を入力にする"
+    ),
+    raw_root: Path = typer.Option(_DEFAULT_RAW),
+    out_dir: Path = typer.Option(_DEFAULT_OUT),
+    shapes: Path = typer.Option(_DEFAULT_SHAPES),
+    queries_dir: Path = typer.Option(_DEFAULT_QUERIES_REAL),
+) -> None:
+    """MHLW 医療情報ネットの実データ (data/raw/<snapshot_date>/) から千葉市LODを生成する。"""
+
+    raw_dir = raw_root / snapshot_date
+    if not raw_dir.exists():
+        typer.echo(f"[error] {raw_dir} が存在しません。先に `medical-lod download` を実行してください。")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"[pipeline-real] snapshot={snapshot_date} raw={raw_dir}")
+
+    ds = normalize_mhlw(raw_dir)
+
+    typer.echo(
+        f"[normalize] facilities={len(ds.facilities)} services={len(ds.services)} schedules={len(ds.schedules)}"
+    )
+
+    result = build_rdf(ds, out_dir)
+
+    typer.echo(f"[build] triples={result.triples}")
+
+    validation = validate_turtle(result.turtle_path, shapes)
+
+    if not validation.conforms:
+        typer.echo("[validate] FAILED")
+        typer.echo(validation.report_text)
+        raise typer.Exit(code=1)
+
+    typer.echo("[validate] conforms")
+
+    graph = Graph().parse(source=result.turtle_path, format="turtle")
+
+    for query_file in sorted(queries_dir.glob("*.rq")):
+        rows = list(graph.query(query_file.read_text(encoding="utf-8")))
+        typer.echo(f"[query] {query_file.name}: {len(rows)} row(s)")
+
+    typer.echo("[pipeline-real] done")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+BASE <https://example.org/medical-access/>
+PREFIX ex: <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+
+SELECT ?facility ?name ?opens ?closes
+WHERE {
+    ?facility ex:offersClinicalService ?service ;
+              schema:name ?name .
+
+    ?service ex:medicalSpecialty <concept/specialty/3001> ;
+             ex:hasSchedule ?schedule .
+
+    ?schedule schema:dayOfWeek schema:Saturday ;
+              schema:opens ?opens ;
+              schema:closes ?closes .
+}
+ORDER BY ?opens ?name

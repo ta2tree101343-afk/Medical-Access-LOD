@@ -1,0 +1,12 @@
+BASE <https://example.org/medical-access/>
+PREFIX ex: <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+
+SELECT ?facility ?name
+WHERE {
+    ?facility ex:offersClinicalService ?service ;
+              schema:name ?name .
+
+    ?service ex:medicalSpecialty <concept/specialty/1001> .
+}
+ORDER BY ?name
