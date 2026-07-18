@@ -2,11 +2,6 @@
 
 千葉市の医療機関について、**診療科 × 診療時間 × 所在地**を統合したLOD（RDF）。
 
-- 設計書: [`docs/medical-access-lod-design.md`](docs/medical-access-lod-design.md)
-- 実装ステップ: [`docs/implementation-steps.md`](docs/implementation-steps.md)
-- 出典・ライセンス: [`docs/source-and-license.md`](docs/source-and-license.md)
-- Claude Code 指示書: [`CLAUDE.md`](CLAUDE.md)
-
 ## 再現手順
 
 ```bash
