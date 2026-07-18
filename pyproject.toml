@@ -26,6 +26,7 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.9",
     "mypy>=1.14",
+    "moto>=5.2.2",
 ]
 
 [build-system]
