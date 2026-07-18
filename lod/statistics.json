@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-07-18T10:35:17.206169+00:00",
+  "source": "厚生労働省 医療情報ネット",
+  "source_url": "https://data.e-gov.go.jp/data/dataset/321fdf20-5f6a-49e5-bcab-35d81d652c65/resource/af88450b-049c-4deb-8dc9-327312d877e1/download/e-gov20251201.zip",
+  "license": "PDL 1.0 (Public Data License 1.0)",
+  "snapshot_date": "2025-12-01",
+  "raw_sha256": "56aeff58f69bdf0b5063b7797577a27ae7901ceb02d58a9c420f5ac4f7fd88c3",
+  "coverage": {
+    "prefecture": "千葉県",
+    "city": "千葉市",
+    "wards": [
+      "中央区",
+      "花見川区",
+      "稲毛区",
+      "若葉区",
+      "緑区",
+      "美浜区"
+    ]
+  },
+  "counts": {
+    "triples": 74121,
+    "facilities": 509,
+    "hospitals": 40,
+    "clinics": 469,
+    "clinical_services": 1636,
+    "opening_hours": 12978
+  }
+}

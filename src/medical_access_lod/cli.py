@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
-from rdflib import Graph
+from rdflib import Graph, Namespace
+from rdflib.namespace import RDF
 
 from medical_access_lod.application.build_rdf import build_rdf
 from medical_access_lod.application.download_source import (
@@ -225,6 +229,79 @@ def pipeline_real(
         typer.echo(f"[query] {query_file.name}: {len(rows)} row(s)")
 
     typer.echo("[pipeline-real] done")
+
+
+_EX = Namespace("https://example.org/medical-access/")
+_SCHEMA = Namespace("https://schema.org/")
+
+
+@app.command(name="publish-lod")
+def publish_lod(
+    snapshot_date: str = typer.Option(DEFAULT_SNAPSHOT_DATE),
+    raw_root: Path = typer.Option(_DEFAULT_RAW),
+    lod_dir: Path = typer.Option(_REPO_ROOT / "lod"),
+    shapes: Path = typer.Option(_DEFAULT_SHAPES),
+    ontology: Path = typer.Option(_REPO_ROOT / "ontology" / "medical-access.ttl"),
+) -> None:
+    """実データ pipeline を lod/ へ出力し、ontology / shapes / statistics.json を揃える。"""
+
+    raw_dir = raw_root / snapshot_date
+    if not raw_dir.exists():
+        typer.echo(f"[error] {raw_dir} が存在しません。先に `medical-lod download` を実行してください。")
+        raise typer.Exit(code=1)
+
+    lod_dir.mkdir(parents=True, exist_ok=True)
+
+    ds = normalize_mhlw(raw_dir)
+    typer.echo(
+        f"[normalize] facilities={len(ds.facilities)} services={len(ds.services)} schedules={len(ds.schedules)}"
+    )
+
+    result = build_rdf(ds, lod_dir)
+    typer.echo(f"[build] triples={result.triples}")
+
+    validation = validate_turtle(result.turtle_path, shapes)
+    if not validation.conforms:
+        typer.echo("[validate] FAILED")
+        typer.echo(validation.report_text)
+        raise typer.Exit(code=1)
+    typer.echo("[validate] conforms")
+
+    shutil.copy(ontology, lod_dir / "ontology.ttl")
+    shutil.copy(shapes, lod_dir / "shapes.ttl")
+
+    graph = Graph().parse(source=result.turtle_path, format="turtle")
+    hospitals = len(list(graph.subjects(RDF.type, _SCHEMA.Hospital)))
+    clinics = len(list(graph.subjects(RDF.type, _SCHEMA.MedicalClinic)))
+    services = len(list(graph.subjects(RDF.type, _EX.ClinicalService)))
+    schedules = len(list(graph.subjects(RDF.type, _SCHEMA.OpeningHoursSpecification)))
+
+    manifest = json.loads((raw_dir / "manifest.json").read_text(encoding="utf-8"))
+    stats = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": manifest["source"],
+        "source_url": manifest["source_url"],
+        "license": manifest["license"],
+        "snapshot_date": manifest["snapshot_date"],
+        "raw_sha256": manifest["sha256"],
+        "coverage": {
+            "prefecture": "千葉県",
+            "city": "千葉市",
+            "wards": ["中央区", "花見川区", "稲毛区", "若葉区", "緑区", "美浜区"],
+        },
+        "counts": {
+            "triples": len(graph),
+            "facilities": hospitals + clinics,
+            "hospitals": hospitals,
+            "clinics": clinics,
+            "clinical_services": services,
+            "opening_hours": schedules,
+        },
+    }
+    (lod_dir / "statistics.json").write_text(
+        json.dumps(stats, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    typer.echo(f"[publish-lod] wrote {lod_dir}/ (triples={len(graph)})")
 
 
 if __name__ == "__main__":

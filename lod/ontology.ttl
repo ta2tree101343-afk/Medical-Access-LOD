@@ -1,0 +1,66 @@
+@prefix ex:     <https://example.org/medical-access/> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix schema: <https://schema.org/> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@base           <https://example.org/medical-access/> .
+
+<ontology/medical-access>
+    a owl:Ontology ;
+    rdfs:label "Medical Access Ontology"@en , "地域医療アクセスオントロジー"@ja ;
+    rdfs:comment "医療機関・診療科・診療時間・所在地を統合するための語彙。"@ja .
+
+ex:ClinicalService
+    a rdfs:Class , owl:Class ;
+    rdfs:label "診療サービス"@ja , "Clinical Service"@en ;
+    rdfs:comment "医療機関が提供する診療科単位のサービス。医療機関と診療科・診療時間を橋渡しする中間ノード。"@ja .
+
+ex:facilityId
+    a rdf:Property , owl:DatatypeProperty ;
+    rdfs:label "施設ID"@ja ;
+    rdfs:domain schema:MedicalOrganization ;
+    rdfs:range xsd:string ;
+    rdfs:comment "データ提供元が付与する安定した施設識別子。"@ja .
+
+ex:offersClinicalService
+    a rdf:Property , owl:ObjectProperty ;
+    rdfs:label "診療サービス提供"@ja ;
+    rdfs:domain schema:MedicalOrganization ;
+    rdfs:range ex:ClinicalService .
+
+ex:medicalSpecialty
+    a rdf:Property , owl:ObjectProperty ;
+    rdfs:label "診療科"@ja ;
+    rdfs:domain ex:ClinicalService ;
+    rdfs:range skos:Concept .
+
+ex:hasSchedule
+    a rdf:Property , owl:ObjectProperty ;
+    rdfs:label "診療時間"@ja ;
+    rdfs:domain ex:ClinicalService ;
+    rdfs:range schema:OpeningHoursSpecification .
+
+<concept/specialty>
+    a skos:ConceptScheme ;
+    skos:prefLabel "標榜診療科"@ja , "Medical Specialties"@en ;
+    rdfs:comment "本LODで用いる診療科の暫定コード体系。確定後に公式コード体系へ skos:exactMatch で接続する。"@ja .
+
+<concept/specialty/01>
+    a skos:Concept ;
+    skos:inScheme <concept/specialty> ;
+    skos:prefLabel "内科"@ja , "Internal Medicine"@en ;
+    skos:notation "01" .
+
+<concept/specialty/02>
+    a skos:Concept ;
+    skos:inScheme <concept/specialty> ;
+    skos:prefLabel "小児科"@ja , "Pediatrics"@en ;
+    skos:notation "02" .
+
+<concept/specialty/03>
+    a skos:Concept ;
+    skos:inScheme <concept/specialty> ;
+    skos:prefLabel "皮膚科"@ja , "Dermatology"@en ;
+    skos:notation "03" .
