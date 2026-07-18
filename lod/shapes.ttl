@@ -1,0 +1,107 @@
+@prefix ex:     <https://example.org/medical-access/> .
+@prefix schema: <https://schema.org/> .
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+ex:MedicalFacilityShape
+    a sh:NodeShape ;
+    sh:targetClass schema:Hospital ;
+    sh:targetClass schema:MedicalClinic ;
+
+    sh:property [
+        sh:path ex:facilityId ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "施設IDは1つ必要"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path schema:name ;
+        sh:minCount 1 ;
+        sh:message "施設名は1つ以上必要"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path schema:address ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "住所は1つ必要"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path ex:offersClinicalService ;
+        sh:minCount 1 ;
+        sh:message "少なくとも1つの診療サービスが必要"@ja ;
+    ] .
+
+ex:ClinicalServiceShape
+    a sh:NodeShape ;
+    sh:targetClass ex:ClinicalService ;
+
+    sh:property [
+        sh:path ex:medicalSpecialty ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class skos:Concept ;
+        sh:message "診療サービスには診療科が1つ必要"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path ex:hasSchedule ;
+        sh:minCount 1 ;
+        sh:message "診療サービスには診療時間が1つ以上必要"@ja ;
+    ] .
+
+ex:OpeningHoursShape
+    a sh:NodeShape ;
+    sh:targetClass schema:OpeningHoursSpecification ;
+
+    sh:property [
+        sh:path schema:dayOfWeek ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:in ( schema:Monday schema:Tuesday schema:Wednesday schema:Thursday
+                schema:Friday schema:Saturday schema:Sunday ) ;
+        sh:message "曜日は schema.org の DayOfWeek のいずれか"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path schema:opens ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:time ;
+        sh:message "開始時刻は xsd:time"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path schema:closes ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:time ;
+        sh:message "終了時刻は xsd:time"@ja ;
+    ] .
+
+ex:AddressShape
+    a sh:NodeShape ;
+    sh:targetClass schema:PostalAddress ;
+
+    sh:property [
+        sh:path schema:addressRegion ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+    ] ;
+
+    sh:property [
+        sh:path schema:addressLocality ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+    ] ;
+
+    sh:property [
+        sh:path schema:streetAddress ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+    ] .

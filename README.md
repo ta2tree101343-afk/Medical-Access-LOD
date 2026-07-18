@@ -5,11 +5,11 @@
 ## 再現手順
 
 ```bash
-# 依存インストール
 uv sync
 
-# fixtureから LOD をエンドツーエンドで生成
 uv run medical-lod pipeline --prefecture 千葉県 --city 千葉市
+
+uv run medical-lod download && uv run medical-lod publish-lod
 
 # 個別実行
 uv run medical-lod normalize
