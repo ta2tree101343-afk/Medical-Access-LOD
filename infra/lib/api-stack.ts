@@ -3,12 +3,14 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 export interface ApiStackProps extends cdk.StackProps {
   envName: string;
   readModelTable: dynamodb.Table;
+  ecrRepository: ecr.Repository;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -18,14 +20,13 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    this.apiFunction = new lambda.Function(this, 'ApiFunction', {
+    this.apiFunction = new lambda.DockerImageFunction(this, 'ApiFunction', {
       functionName: `medical-access-lod-${props.envName}-api`,
-      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.DockerImageCode.fromEcr(props.ecrRepository, {
+        tagOrDigest: 'api',
+        cmd: ['medical_access_lod.functions.api.handler.lambda_handler'],
+      }),
       architecture: lambda.Architecture.ARM_64,
-      handler: 'medical_access_lod.functions.api.handler.lambda_handler',
-      code: lambda.Code.fromInline(
-        'def lambda_handler(event, context):\n    return {"statusCode": 501, "body": "not deployed"}\n',
-      ),
       memorySize: 512,
       timeout: cdk.Duration.seconds(10),
       tracing: lambda.Tracing.ACTIVE,
