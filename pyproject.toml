@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 license = { text = "CC-BY-4.0" }
 authors = [{ name = "Medical Access LOD" }]
 dependencies = [
-    "aws-lambda-powertools>=3.0",
+    "aws-lambda-powertools[tracer]>=3.0",
     "boto3>=1.35",
     "rdflib>=7.1",
     "pyshacl>=0.29",
@@ -54,7 +54,7 @@ disallow_untyped_defs = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["pyshacl.*", "rdflib.*", "polars.*"]
+module = ["pyshacl.*", "rdflib.*", "polars.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
