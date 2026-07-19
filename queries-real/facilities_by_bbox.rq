@@ -1,0 +1,17 @@
+BASE <https://example.org/medical-access/>
+PREFIX ex: <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+
+SELECT ?facility ?name ?lat ?lon
+WHERE {
+    ?facility a ?type ;
+              schema:name ?name ;
+              schema:geo ?geo .
+
+    ?geo schema:latitude ?lat ;
+         schema:longitude ?lon .
+
+    FILTER(?type IN (schema:Hospital, schema:MedicalClinic))
+    FILTER(?lat >= 35.60 && ?lat <= 35.63 && ?lon >= 140.08 && ?lon <= 140.15)
+}
+ORDER BY ?name

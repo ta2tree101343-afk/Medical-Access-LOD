@@ -149,6 +149,15 @@ def _add_facility(graph: Graph, facility: Facility) -> None:
 
     graph.add((a_ref, SCHEMA.streetAddress, Literal(facility.address.street_address, lang="ja")))
 
+    if facility.geo is not None:
+        from rdflib import BNode
+
+        geo_node = BNode()
+        graph.add((f_ref, SCHEMA.geo, geo_node))
+        graph.add((geo_node, RDF.type, SCHEMA.GeoCoordinates))
+        graph.add((geo_node, SCHEMA.latitude, Literal(facility.geo.latitude, datatype=XSD.double)))
+        graph.add((geo_node, SCHEMA.longitude, Literal(facility.geo.longitude, datatype=XSD.double)))
+
 
 def _add_schedules(graph: Graph, dataset: NormalizedDataset) -> None:
 

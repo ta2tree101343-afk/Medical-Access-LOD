@@ -7,6 +7,7 @@ import polars as pl
 from medical_access_lod.application.normalize_data import NormalizedDataset
 from medical_access_lod.domain.models.clinical_service import ClinicalService
 from medical_access_lod.domain.models.facility import Address, Facility, FacilityType
+from medical_access_lod.domain.models.geo import GeoCoordinates
 from medical_access_lod.domain.models.schedule import Schedule
 from medical_access_lod.domain.values.day_of_week import DayOfWeek
 from medical_access_lod.domain.values.facility_id import FacilityId
@@ -60,6 +61,19 @@ def _strip_prefix(street: str, prefecture: str, city: str) -> str:
     return remainder.strip() or street
 
 
+def _try_geo(lat_raw: object, lon_raw: object) -> GeoCoordinates | None:
+    if lat_raw in (None, "") or lon_raw in (None, ""):
+        return None
+    try:
+        lat = float(str(lat_raw))
+        lon = float(str(lon_raw))
+    except (ValueError, TypeError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return GeoCoordinates(latitude=lat, longitude=lon)
+
+
 def _build_facilities(facility_df: pl.DataFrame) -> list[Facility]:
     out: list[Facility] = []
     seen: set[str] = set()
@@ -76,6 +90,7 @@ def _build_facilities(facility_df: pl.DataFrame) -> list[Facility]:
         street_raw = str(row.get("所在地") or "").strip()
         street = _strip_prefix(street_raw, prefecture, city) or street_raw or city
         ftype = FacilityType(str(row["_facility_type"]))
+        geo = _try_geo(row.get("所在地座標（緯度）"), row.get("所在地座標（経度）"))
         out.append(
             Facility(
                 facility_id=FacilityId(fid),
@@ -86,6 +101,7 @@ def _build_facilities(facility_df: pl.DataFrame) -> list[Facility]:
                     city=city,
                     street_address=street,
                 ),
+                geo=geo,
             )
         )
     return out

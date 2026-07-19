@@ -165,6 +165,15 @@ def test_specialty_concepts_have_prefLabel(graph: Graph) -> None:
         assert labels, f"no prefLabel on {concept}"
 
 
+def test_facilities_have_geo_coordinates(graph: Graph) -> None:
+    geos = list(graph.subject_objects(SCHEMA.geo))
+    assert geos, "no schema:geo triples produced"
+    for _facility, geo_node in geos:
+        assert (geo_node, RDF.type, SCHEMA.GeoCoordinates) in graph
+        assert (geo_node, SCHEMA.latitude, None) in graph
+        assert (geo_node, SCHEMA.longitude, None) in graph
+
+
 def test_turtle_roundtrip(graph: Graph, tmp_path: Path) -> None:
 
     ttl = tmp_path / "out.ttl"

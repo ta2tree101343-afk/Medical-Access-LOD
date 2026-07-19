@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from medical_access_lod.domain.models.geo import GeoCoordinates
 from medical_access_lod.domain.values.facility_id import FacilityId
 
 
@@ -33,3 +34,5 @@ class Facility(BaseModel):
     facility_type: FacilityType
 
     address: Address
+
+    geo: GeoCoordinates | None = None

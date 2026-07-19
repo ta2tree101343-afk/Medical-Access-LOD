@@ -8,6 +8,7 @@ import polars as pl
 
 from medical_access_lod.domain.models.clinical_service import ClinicalService
 from medical_access_lod.domain.models.facility import Address, Facility, FacilityType
+from medical_access_lod.domain.models.geo import GeoCoordinates
 from medical_access_lod.domain.models.schedule import Schedule
 from medical_access_lod.domain.values.day_of_week import DayOfWeek
 from medical_access_lod.domain.values.facility_id import FacilityId
@@ -44,6 +45,15 @@ def _dedup_by_facility_id(rows: Iterable[dict[str, object]]) -> list[dict[str, o
     return list(seen.values())
 
 
+def _try_geo(lat_raw: object, lon_raw: object) -> GeoCoordinates | None:
+    if lat_raw in (None, "") or lon_raw in (None, ""):
+        return None
+    try:
+        return GeoCoordinates(latitude=float(str(lat_raw)), longitude=float(str(lon_raw)))
+    except (ValueError, TypeError):
+        return None
+
+
 def normalize_facilities(csv_path: Path) -> list[Facility]:
 
     df = pl.read_csv(csv_path)
@@ -60,6 +70,7 @@ def normalize_facilities(csv_path: Path) -> list[Facility]:
                 city=str(row["city"]).strip(),
                 street_address=str(row["street_address"]).strip(),
             ),
+            geo=_try_geo(row.get("latitude"), row.get("longitude")),
         )
         for row in rows
     ]
