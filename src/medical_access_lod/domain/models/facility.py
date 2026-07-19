@@ -13,6 +13,8 @@ class FacilityType(StrEnum):
 
     CLINIC = "clinic"
 
+    DENTIST = "dentist"
+
 
 class Address(BaseModel):
     model_config = ConfigDict(frozen=True)
