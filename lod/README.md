@@ -26,10 +26,11 @@
 
 | 指標 | 値 |
 | --- | --- |
-| RDF トリプル | 74,121 |
+| RDF トリプル | **76,239** |
 | 医療機関 | 509（病院 40 / 診療所 469） |
 | 診療サービス（施設 × 診療科） | 1,636 |
 | 診療時間スロット | 12,978 |
+| 位置情報付き施設 (schema:geo) | 509 中の該当分（原データ由来） |
 
 ## ダウンロード URL
 
@@ -46,6 +47,7 @@ https://raw.githubusercontent.com/ta2tree101343-afk/Medical-Access-LOD/main/lod/
 - 診療科は `skos:ConceptScheme <concept/specialty>` 配下の `skos:Concept`
 - 診療科コードは MHLW 公式 4 桁体系（内科=`1001` / 小児科=`3001` / 皮膚科=`6001` 等）を `skos:notation` に採用
 - 施設は具象クラス `schema:Hospital` / `schema:MedicalClinic` として型付け
+- 位置情報は `schema:geo` → `schema:GeoCoordinates` (`schema:latitude` / `schema:longitude`, `xsd:double`)
 - 時刻は `xsd:time`（`HH:MM:SS`、24 時制、TZ・小数秒なし）
 
 ## SPARQL 例（RDFLib での確認済み件数）
@@ -117,6 +119,19 @@ SELECT ?ward (COUNT(DISTINCT ?facility) AS ?count) WHERE {
 }
 GROUP BY ?ward
 ORDER BY DESC(?count)
+```
+
+```sparql
+# 千葉駅周辺 (bounding box) の医療機関 — 111 件
+BASE <https://example.org/medical-access/>
+PREFIX schema: <https://schema.org/>
+SELECT ?facility ?name ?lat ?lon WHERE {
+  ?facility a ?type ; schema:name ?name ; schema:geo ?geo .
+  ?geo schema:latitude ?lat ; schema:longitude ?lon .
+  FILTER(?type IN (schema:Hospital, schema:MedicalClinic))
+  FILTER(?lat >= 35.60 && ?lat <= 35.63 && ?lon >= 140.08 && ?lon <= 140.15)
+}
+ORDER BY ?name
 ```
 
 ## 免責事項

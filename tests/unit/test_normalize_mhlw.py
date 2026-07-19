@@ -59,3 +59,12 @@ def test_specialty_labels_cover_all_used_codes() -> None:
     for code in used_codes:
         assert code in ds.specialty_labels, f"missing label for {code}"
         assert ds.specialty_labels[code].strip() != ""
+
+
+def test_geo_coordinates_when_present_are_valid() -> None:
+    ds = normalize_mhlw(SAMPLE)
+    with_geo = [f for f in ds.facilities if f.geo is not None]
+    assert with_geo, "expected at least one facility with geo in sample"
+    for f in with_geo:
+        assert -90.0 <= f.geo.latitude <= 90.0
+        assert -180.0 <= f.geo.longitude <= 180.0

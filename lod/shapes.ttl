@@ -105,3 +105,27 @@ ex:AddressShape
         sh:minCount 1 ;
         sh:maxCount 1 ;
     ] .
+
+ex:GeoCoordinatesShape
+    a sh:NodeShape ;
+    sh:targetClass schema:GeoCoordinates ;
+
+    sh:property [
+        sh:path schema:latitude ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:double ;
+        sh:minInclusive -90.0 ;
+        sh:maxInclusive 90.0 ;
+        sh:message "緯度は -90 〜 90 (xsd:double)"@ja ;
+    ] ;
+
+    sh:property [
+        sh:path schema:longitude ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:double ;
+        sh:minInclusive -180.0 ;
+        sh:maxInclusive 180.0 ;
+        sh:message "経度は -180 〜 180 (xsd:double)"@ja ;
+    ] .
