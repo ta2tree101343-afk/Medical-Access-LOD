@@ -27,6 +27,7 @@ from medical_access_lod.infrastructure.rdf.uri_factory import (
 _FACILITY_CLASS: dict[FacilityType, URIRef] = {
     FacilityType.HOSPITAL: SCHEMA.Hospital,
     FacilityType.CLINIC: SCHEMA.MedicalClinic,
+    FacilityType.DENTIST: SCHEMA.Dentist,
 }
 
 

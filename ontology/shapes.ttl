@@ -8,6 +8,7 @@ ex:MedicalFacilityShape
     a sh:NodeShape ;
     sh:targetClass schema:Hospital ;
     sh:targetClass schema:MedicalClinic ;
+    sh:targetClass schema:Dentist ;
 
     sh:property [
         sh:path ex:facilityId ;

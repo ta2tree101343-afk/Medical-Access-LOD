@@ -164,17 +164,27 @@ def normalize_mhlw(raw_dir: Path) -> NormalizedDataset:
     千葉市 (中央/花見川/稲毛/若葉/緑/美浜 の 6 区) を抽出して正規化する。"""
     hospital_facility_csv = next(raw_dir.glob("*hospital_facility_info*.csv"))
     clinic_facility_csv = next(raw_dir.glob("*clinic_facility_info*.csv"))
+    dental_facility_csvs = list(raw_dir.glob("*dental_facility_info*.csv"))
     hospital_hours_csv = next(raw_dir.glob("*hospital_speciality_hours*.csv"))
     clinic_hours_csv = next(raw_dir.glob("*clinic_speciality_hours*.csv"))
+    dental_hours_csvs = list(raw_dir.glob("*dental_speciality_hours*.csv"))
 
-    hospital_df = _load_facility_csv(hospital_facility_csv, FacilityType.HOSPITAL)
-    clinic_df = _load_facility_csv(clinic_facility_csv, FacilityType.CLINIC)
-    facility_df = pl.concat([hospital_df, clinic_df], how="diagonal_relaxed")
+    facility_frames = [
+        _load_facility_csv(hospital_facility_csv, FacilityType.HOSPITAL),
+        _load_facility_csv(clinic_facility_csv, FacilityType.CLINIC),
+    ]
+    if dental_facility_csvs:
+        facility_frames.append(_load_facility_csv(dental_facility_csvs[0], FacilityType.DENTIST))
+    facility_df = pl.concat(facility_frames, how="diagonal_relaxed")
 
     allowed_ids: set[int] = {int(v) for v in facility_df["ID"].to_list()}
-    hospital_hours_df = _load_schedule_csv(hospital_hours_csv, allowed_ids)
-    clinic_hours_df = _load_schedule_csv(clinic_hours_csv, allowed_ids)
-    schedule_df = pl.concat([hospital_hours_df, clinic_hours_df], how="diagonal_relaxed")
+    schedule_frames = [
+        _load_schedule_csv(hospital_hours_csv, allowed_ids),
+        _load_schedule_csv(clinic_hours_csv, allowed_ids),
+    ]
+    if dental_hours_csvs:
+        schedule_frames.append(_load_schedule_csv(dental_hours_csvs[0], allowed_ids))
+    schedule_df = pl.concat(schedule_frames, how="diagonal_relaxed")
 
     _SPECIALTY_LABELS_SCRATCH.clear()
     facilities = _build_facilities(facility_df)

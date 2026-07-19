@@ -26,11 +26,11 @@
 
 | 指標 | 値 |
 | --- | --- |
-| RDF トリプル | **76,239** |
-| 医療機関 | 509（病院 40 / 診療所 469） |
-| 診療サービス（施設 × 診療科） | 1,636 |
-| 診療時間スロット | 12,978 |
-| 位置情報付き施設 (schema:geo) | 509 中の該当分（原データ由来） |
+| RDF トリプル | **127,842** |
+| 医療機関 | 897（病院 40 / 診療所 469 / 歯科診療所 388） |
+| 診療サービス（施設 × 診療科） | 2,586 |
+| 診療時間スロット | 21,795 |
+| 位置情報付き施設 (schema:geo) | 原データ由来 |
 
 ## ダウンロード URL
 
@@ -46,7 +46,7 @@ https://raw.githubusercontent.com/ta2tree101343-afk/Medical-Access-LOD/main/lod/
 - 中間ノード `ex:ClinicalService` により「施設 × 診療科 × 診療時間」の 3 項関係を表現
 - 診療科は `skos:ConceptScheme <concept/specialty>` 配下の `skos:Concept`
 - 診療科コードは MHLW 公式 4 桁体系（内科=`1001` / 小児科=`3001` / 皮膚科=`6001` 等）を `skos:notation` に採用
-- 施設は具象クラス `schema:Hospital` / `schema:MedicalClinic` として型付け
+- 施設は具象クラス `schema:Hospital` / `schema:MedicalClinic` / `schema:Dentist` として型付け
 - 位置情報は `schema:geo` → `schema:GeoCoordinates` (`schema:latitude` / `schema:longitude`, `xsd:double`)
 - 時刻は `xsd:time`（`HH:MM:SS`、24 時制、TZ・小数秒なし）
 
