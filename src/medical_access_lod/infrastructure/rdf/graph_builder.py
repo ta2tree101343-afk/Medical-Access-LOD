@@ -12,6 +12,10 @@ from medical_access_lod.application.normalize_data import NormalizedDataset
 from medical_access_lod.domain.models.facility import Facility, FacilityType
 from medical_access_lod.domain.values.day_of_week import DayOfWeek
 from medical_access_lod.domain.values.medical_specialty import SpecialtyCode
+from medical_access_lod.infrastructure.rdf.dataset_metadata import (
+    DatasetMetadata,
+    add_dataset_metadata,
+)
 from medical_access_lod.infrastructure.rdf.uri_factory import (
     BASE,
     EX,
@@ -48,7 +52,12 @@ def _bind_prefixes(graph: Graph) -> None:
     graph.base = URIRef(BASE)
 
 
-def build_graph(dataset: NormalizedDataset, *, include_ontology: bool = True) -> Graph:
+def build_graph(
+    dataset: NormalizedDataset,
+    *,
+    include_ontology: bool = True,
+    metadata: DatasetMetadata | None = None,
+) -> Graph:
     """NormalizedDataset から RDF グラフを構築する。"""
 
     graph = Graph()
@@ -89,6 +98,8 @@ def build_graph(dataset: NormalizedDataset, *, include_ontology: bool = True) ->
             graph.add((f_ref, EX.offersClinicalService, s_ref))
 
     _add_schedules(graph, dataset)
+
+    add_dataset_metadata(graph, metadata)
 
     return graph
 

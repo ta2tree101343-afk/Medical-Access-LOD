@@ -22,6 +22,7 @@ from medical_access_lod.application.download_source import (
 from medical_access_lod.application.normalize_data import normalize
 from medical_access_lod.application.normalize_mhlw import normalize_mhlw
 from medical_access_lod.application.validate_rdf import validate_turtle
+from medical_access_lod.infrastructure.rdf.dataset_metadata import DatasetMetadata
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -258,7 +259,11 @@ def publish_lod(
         f"[normalize] facilities={len(ds.facilities)} services={len(ds.services)} schedules={len(ds.schedules)}"
     )
 
-    result = build_rdf(ds, lod_dir)
+    dataset_metadata = DatasetMetadata(
+        snapshot_date=snapshot_date,
+        generated_at=datetime.now(UTC).isoformat(),
+    )
+    result = build_rdf(ds, lod_dir, metadata=dataset_metadata)
     typer.echo(f"[build] triples={result.triples}")
 
     validation = validate_turtle(result.turtle_path, shapes)
