@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from medical_access_lod.application.normalize_data import NormalizedDataset
+from medical_access_lod.infrastructure.rdf.dataset_metadata import DatasetMetadata
 from medical_access_lod.infrastructure.rdf.graph_builder import (
     build_graph,
     serialize_jsonld,
@@ -22,9 +23,13 @@ class BuildResult:
     triples: int
 
 
-def build_rdf(dataset: NormalizedDataset, out_dir: Path) -> BuildResult:
+def build_rdf(
+    dataset: NormalizedDataset,
+    out_dir: Path,
+    metadata: DatasetMetadata | None = None,
+) -> BuildResult:
 
-    graph = build_graph(dataset)
+    graph = build_graph(dataset, metadata=metadata)
 
     ttl = out_dir / "medical-access-lod.ttl"
 

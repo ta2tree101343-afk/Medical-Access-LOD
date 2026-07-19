@@ -174,6 +174,24 @@ def test_facilities_have_geo_coordinates(graph: Graph) -> None:
         assert (geo_node, SCHEMA.longitude, None) in graph
 
 
+def test_dataset_has_void_and_dcat_metadata(graph: Graph) -> None:
+    from medical_access_lod.infrastructure.rdf.dataset_metadata import DCAT, DCT, VOID
+
+    ds = URIRef(f"{BASE}dataset")
+    assert (ds, RDF.type, VOID.Dataset) in graph
+    assert (ds, RDF.type, DCAT.Dataset) in graph
+    assert list(graph.objects(ds, DCT.title))
+    assert list(graph.objects(ds, DCT.license))
+    assert list(graph.objects(ds, VOID.dataDump))
+
+    distributions = list(graph.objects(ds, DCAT.distribution))
+    assert len(distributions) == 2  # Turtle + JSON-LD
+    for dist in distributions:
+        assert (dist, RDF.type, DCAT.Distribution) in graph
+        assert list(graph.objects(dist, DCAT.downloadURL))
+        assert list(graph.objects(dist, DCAT.mediaType))
+
+
 def test_turtle_roundtrip(graph: Graph, tmp_path: Path) -> None:
 
     ttl = tmp_path / "out.ttl"
