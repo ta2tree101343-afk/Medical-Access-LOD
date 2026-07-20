@@ -114,3 +114,72 @@ def test_register_staged_rejects_empty_run_id(catalog_env: str) -> None:
 def test_mark_committed_rejects_empty_run_id(catalog_env: str) -> None:
     with pytest.raises(ValueError, match="run_id"):
         generation_catalog.mark_committed(catalog_env, "")
+
+
+def test_mark_deleting_transitions_committed_to_deleting(catalog_env: str) -> None:
+    _register(catalog_env, "run-A")
+    generation_catalog.mark_committed(catalog_env, "run-A")
+    generation_catalog.mark_deleting(catalog_env, "run-A")
+    entry = generation_catalog.get(catalog_env, "run-A")
+    assert entry is not None
+    assert entry["status"] == "DELETING"
+    assert int(entry["deleting_at"]) > 0
+
+
+def test_mark_deleting_is_idempotent(catalog_env: str) -> None:
+    _register(catalog_env, "run-A")
+    generation_catalog.mark_committed(catalog_env, "run-A")
+    generation_catalog.mark_deleting(catalog_env, "run-A")
+    # 冪等: 再度呼んでも例外にならない
+    generation_catalog.mark_deleting(catalog_env, "run-A")
+
+
+def test_mark_deleting_rejects_staged(catalog_env: str) -> None:
+    """未完了 (STAGED) の世代を Cleanup 対象にしてはならない。"""
+    _register(catalog_env, "run-A")
+    with pytest.raises(generation_catalog.GenerationCatalogConflictError):
+        generation_catalog.mark_deleting(catalog_env, "run-A")
+
+
+def test_mark_deleting_raises_missing_when_not_registered(catalog_env: str) -> None:
+    with pytest.raises(generation_catalog.GenerationCatalogMissingError):
+        generation_catalog.mark_deleting(catalog_env, "unknown")
+
+
+def test_mark_deleted_transitions_deleting_to_deleted(catalog_env: str) -> None:
+    _register(catalog_env, "run-A")
+    generation_catalog.mark_committed(catalog_env, "run-A")
+    generation_catalog.mark_deleting(catalog_env, "run-A")
+    generation_catalog.mark_deleted(catalog_env, "run-A")
+    entry = generation_catalog.get(catalog_env, "run-A")
+    assert entry is not None
+    assert entry["status"] == "DELETED"
+    assert int(entry["deleted_at"]) > 0
+
+
+def test_mark_deleted_rejects_committed_without_intermediate_deleting(catalog_env: str) -> None:
+    """COMMITTED を直接 DELETED にはできない (DELETING 経由必須)."""
+    _register(catalog_env, "run-A")
+    generation_catalog.mark_committed(catalog_env, "run-A")
+    with pytest.raises(generation_catalog.GenerationCatalogConflictError):
+        generation_catalog.mark_deleted(catalog_env, "run-A")
+
+
+def test_list_by_status_returns_only_matching_entries(catalog_env: str) -> None:
+    from medical_access_lod.functions.shared.generation_catalog import GenerationStatus
+    _register(catalog_env, "run-staged")
+    _register(catalog_env, "run-committed")
+    generation_catalog.mark_committed(catalog_env, "run-committed")
+    _register(catalog_env, "run-deleted")
+    generation_catalog.mark_committed(catalog_env, "run-deleted")
+    generation_catalog.mark_deleting(catalog_env, "run-deleted")
+    generation_catalog.mark_deleted(catalog_env, "run-deleted")
+
+    committed = generation_catalog.list_by_status(catalog_env, GenerationStatus.COMMITTED)
+    assert [e["run_id"] for e in committed] == ["run-committed"]
+
+    deleted = generation_catalog.list_by_status(catalog_env, GenerationStatus.DELETED)
+    assert [e["run_id"] for e in deleted] == ["run-deleted"]
+
+    staged = generation_catalog.list_by_status(catalog_env, GenerationStatus.STAGED)
+    assert [e["run_id"] for e in staged] == ["run-staged"]

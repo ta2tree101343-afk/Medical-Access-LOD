@@ -124,8 +124,8 @@ describe('PipelineStack', () => {
   const { pipeline } = build();
   const template = Template.fromStack(pipeline);
 
-  test('has 6 Lambda functions (Docker image based)', () => {
-    template.resourceCountIs('AWS::Lambda::Function', 6);
+  test('has 7 Lambda functions (Docker image based; 6 pipeline + Cleanup)', () => {
+    template.resourceCountIs('AWS::Lambda::Function', 7);
   });
 
   test('all Lambdas are arm64 with ACTIVE tracing', () => {
@@ -361,6 +361,90 @@ describe('PipelineStack', () => {
       return containsWrite && targetsInventoryPrefix;
     });
     expect(inventoryWriteStatement).toBeDefined();
+  });
+
+  test('Cleanup queue exists with a DLQ (max 3 receives)', () => {
+    // 2 queues expected: main + DLQ
+    template.resourceCountIs('AWS::SQS::Queue', 2);
+    template.hasResourceProperties('AWS::SQS::Queue', {
+      RedrivePolicy: Match.objectLike({ maxReceiveCount: 3 }),
+    });
+  });
+
+  test('NotifyCleanupQueue Task sends the trigger_run_id and buckets', () => {
+    const cleanup = definition.States['NotifyCleanupQueue'];
+    expect(cleanup.Type).toBe('Task');
+    expect(cleanup.Resource).toMatch(/sqs:sendMessage$/);
+    const body = cleanup.Parameters.MessageBody;
+    expect(body['trigger_run_id.$']).toBe('$.run_id');
+    expect(body['read_model_table.$']).toBe('$.read_model_table');
+    expect(body['inventory_bucket.$']).toBe('$.build_bucket');
+    expect(body['dist_bucket.$']).toBe('$.dist_bucket');
+  });
+
+  test('Cleanup runs strictly after Publish (order: ReadModel → Publish → Notify)', () => {
+    expect(definition.States['PublishTask'].Next).toBe('NotifyCleanupQueue');
+    expect(definition.States['NotifyCleanupQueue'].End).toBe(true);
+  });
+
+  test('Cleanup IAM cannot touch SYSTEM#PIPELINE lock', () => {
+    const policies = template.findResources('AWS::IAM::Policy');
+    const statements = Object.values(policies).flatMap(
+      (policy: any) => policy.Properties.PolicyDocument.Statement,
+    );
+    // Cleanup 用の DynamoDB Statement (LeadingKeys=SYSTEM#GENERATION+GENERATION) を探す
+    const cleanupDdbStatement = statements.find((statement: any) => {
+      const leadingKeys = statement.Condition?.['ForAllValues:StringEquals']?.[
+        'dynamodb:LeadingKeys'
+      ];
+      if (!Array.isArray(leadingKeys)) return false;
+      return (
+        leadingKeys.includes('SYSTEM#GENERATION')
+        && leadingKeys.includes('GENERATION')
+      );
+    });
+    expect(cleanupDdbStatement).toBeDefined();
+    const leadingKeys = cleanupDdbStatement.Condition['ForAllValues:StringEquals'][
+      'dynamodb:LeadingKeys'
+    ];
+    // 決して SYSTEM#PIPELINE は含まれてはならない (Publish の lock を守るため)
+    expect(leadingKeys).not.toContain('SYSTEM#PIPELINE');
+  });
+
+  test('Cleanup can read manifest and inventory only', () => {
+    const policies = template.findResources('AWS::IAM::Policy');
+    const statements = Object.values(policies).flatMap(
+      (policy: any) => policy.Properties.PolicyDocument.Statement,
+    );
+    // manifest.json 単独への read grant
+    const manifestRead = statements.find((statement: any) => {
+      const resources = Array.isArray(statement.Resource)
+        ? statement.Resource
+        : [statement.Resource];
+      return resources.some((r: any) =>
+        typeof r === 'object'
+        && r['Fn::Join']
+        && JSON.stringify(r['Fn::Join']).includes('latest/manifest.json'),
+      );
+    });
+    expect(manifestRead).toBeDefined();
+    // inventory prefix への read grant
+    const inventoryRead = statements.find((statement: any) => {
+      const actions = Array.isArray(statement.Action)
+        ? statement.Action
+        : [statement.Action];
+      const resources = Array.isArray(statement.Resource)
+        ? statement.Resource
+        : [statement.Resource];
+      const isRead = actions.some((a: string) => a.startsWith('s3:Get') || a === 's3:*');
+      const targetsGenerations = resources.some((r: any) =>
+        typeof r === 'object'
+        && r['Fn::Join']
+        && JSON.stringify(r['Fn::Join']).includes('generations/*'),
+      );
+      return isRead && targetsGenerations;
+    });
+    expect(inventoryRead).toBeDefined();
   });
 });
 

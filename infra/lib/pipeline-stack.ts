@@ -5,9 +5,11 @@ import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Construct } from 'constructs';
 
 export interface PipelineStackProps extends cdk.StackProps {
@@ -148,6 +150,84 @@ export class PipelineStack extends cdk.Stack {
 
     this.pipelineFunctions = fns;
 
+    // ==== Cleanup Lambda (旧世代 GC) ====
+    //
+    // Publish の manifest CAS commit 後、SFN が SQS メッセージを送って発火する。
+    // Publish とは別の IAM Role を持ち、SYSTEM#PIPELINE (lock) にはアクセス不可。
+    // GENERATION#* (実データ) と SYSTEM#GENERATION (catalog) のみ操作する。
+    //
+    // 削除ポリシー: 現行 manifest 世代を絶対に消さない + 直近 N 世代 (default 6)
+    //   + 最低保持期間 (default 365 日) を維持する。詳細は
+    //   src/medical_access_lod/functions/shared/generation_retention.py。
+    const cleanupDlq = new sqs.Queue(this, 'CleanupDLQ', {
+      queueName: `medical-access-lod-${props.envName}-cleanup-dlq`,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const cleanupQueue = new sqs.Queue(this, 'CleanupQueue', {
+      queueName: `medical-access-lod-${props.envName}-cleanup`,
+      // Cleanup は分単位で終わる想定。visibility は Lambda timeout の 6 倍。
+      visibilityTimeout: cdk.Duration.minutes(30),
+      retentionPeriod: cdk.Duration.days(4),
+      enforceSSL: true,
+      deadLetterQueue: {
+        queue: cleanupDlq,
+        maxReceiveCount: 3,
+      },
+    });
+
+    const cleanupFn = new lambda.DockerImageFunction(this, 'CleanupFunction', {
+      functionName: `medical-access-lod-${props.envName}-cleanup`,
+      code: lambda.DockerImageCode.fromEcr(props.ecrRepository, {
+        tagOrDigest: 'cleanup',
+        cmd: ['medical_access_lod.functions.cleanup.handler.lambda_handler'],
+      }),
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 1024,
+      timeout: cdk.Duration.minutes(5),
+      tracing: lambda.Tracing.ACTIVE,
+      logGroup: new logs.LogGroup(this, 'CleanupLogGroup', {
+        logGroupName: `/aws/lambda/medical-access-lod-${props.envName}-cleanup`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+      environment: {
+        ENVIRONMENT: props.envName,
+        POWERTOOLS_SERVICE_NAME: 'medical-access-lod-cleanup',
+        POWERTOOLS_METRICS_NAMESPACE: 'MedicalAccessLOD',
+        FUNCTION_KEY: 'Cleanup',
+      },
+    });
+
+    // Cleanup IAM: SYSTEM#PIPELINE は決して触らせない。
+    // - catalog (SYSTEM#GENERATION) の UpdateItem/GetItem
+    // - 実データ (GENERATION#*) の BatchWriteItem/DeleteItem/Query
+    cleanupFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'dynamodb:GetItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:Query',
+        'dynamodb:BatchWriteItem',
+        'dynamodb:DeleteItem',
+      ],
+      resources: [props.readModelTable.tableArn],
+      conditions: {
+        'ForAllValues:StringEquals': {
+          'dynamodb:LeadingKeys': ['SYSTEM#GENERATION', 'GENERATION'],
+        },
+      },
+    }));
+    // manifest 参照 (現行世代の判定に必須)
+    props.distBucket.grantRead(cleanupFn, 'latest/manifest.json');
+    // inventory 参照 (BatchWriteItem 対象キーの列挙)
+    props.buildBucket.grantRead(cleanupFn, 'generations/*');
+
+    // SQS → Cleanup Lambda
+    cleanupFn.addEventSource(new lambdaEventSources.SqsEventSource(cleanupQueue, {
+      batchSize: 1,  // 各メッセージは全世代の GC を試みるので並列不要
+      reportBatchItemFailures: true,
+    }));
+
     // Step Functions
     //
     // 各 Lambda の入力仕様 (Pydantic) は src/medical_access_lod/functions/shared/events.py
@@ -258,12 +338,29 @@ export class PipelineStack extends cdk.Stack {
       cause: 'RDF validation failed',
     });
 
-    // 順序: ReadModel → Publish
+    // Publish 完了後に Cleanup キューへ通知を送る。SFN は best-effort ではなく
+    // 同期呼び出し (::sqs:sendMessage) にすることで、Publish 成功 = Cleanup
+    // メッセージ enqueued 済み を保証する (実際の削除は非同期)。
+    const notifyCleanup = new tasks.SqsSendMessage(this, 'NotifyCleanupQueue', {
+      queue: cleanupQueue,
+      messageBody: sfn.TaskInput.fromObject({
+        trigger_run_id: sfn.JsonPath.stringAt('$.run_id'),
+        read_model_table: sfn.JsonPath.stringAt('$.read_model_table'),
+        inventory_bucket: sfn.JsonPath.stringAt('$.build_bucket'),
+        dist_bucket: sfn.JsonPath.stringAt('$.dist_bucket'),
+      }),
+      resultPath: '$.cleanup_notice',
+    });
+
+    // 順序: ReadModel → Publish → NotifyCleanupQueue
     // ReadModel が失敗した場合に公開 S3 (dist bucket) を更新しないことで、
     // API が旧データ、公開ダンプが新データ という乖離を避ける。
     // (Publish 先行の場合は公開後に ReadModel 失敗すると乖離が発生する)
     const branchOnValidation = new sfn.Choice(this, 'IsRdfValid')
-      .when(sfn.Condition.booleanEquals('$.validate.conforms', true), readModel.next(publish))
+      .when(
+        sfn.Condition.booleanEquals('$.validate.conforms', true),
+        readModel.next(publish).next(notifyCleanup),
+      )
       .otherwise(notifyFailure);
 
     const definition = injectContext
