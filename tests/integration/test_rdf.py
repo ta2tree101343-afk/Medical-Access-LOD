@@ -216,3 +216,42 @@ def test_jsonld_roundtrip(graph: Graph, tmp_path: Path) -> None:
     reparsed.parse(source=js, format="json-ld")
 
     assert len(reparsed) == len(graph)
+
+
+def test_jsonld_iris_are_absolute(graph: Graph, tmp_path: Path) -> None:
+    """JSON-LD が @base 情報を落とすと、再パース時に相対 IRI が
+    file:// に解決され Turtle と別グラフになる (実測での症状:
+    固定 IRI を使う SPARQL がすべて 0 件になる) ため回帰テストを置く。"""
+
+    ttl = tmp_path / "out.ttl"
+    js = tmp_path / "out.jsonld"
+
+    serialize_turtle(graph, ttl)
+    serialize_jsonld(graph, js)
+
+    g_ttl = Graph()
+    g_ttl.parse(source=ttl, format="turtle")
+
+    g_js = Graph()
+    g_js.parse(source=js, format="json-ld")
+
+    # 相対 IRI として file:// に解決された主語が混ざっていないこと
+    for subj in g_js.subjects():
+        assert not str(subj).startswith("file:"), (
+            f"JSON-LD の再パースで file:// 相対解決が発生: {subj!r}"
+        )
+
+    # BASE 名前空間配下の主語が両フォーマットで一致すること
+    base_str = str(BASE)
+    ttl_subjects = {str(s) for s in g_ttl.subjects() if str(s).startswith(base_str)}
+    js_subjects = {str(s) for s in g_js.subjects() if str(s).startswith(base_str)}
+    assert ttl_subjects == js_subjects, (
+        f"TTL と JSON-LD で {base_str} 配下の主語集合が一致しない"
+    )
+
+    # 固定 IRI を用いた SPARQL が両フォーマットで同じ件数を返すこと
+    query = f"""
+    PREFIX ex: <{EX}>
+    SELECT ?s WHERE {{ ?s ex:offersClinicalService ?o . }}
+    """
+    assert len(list(g_ttl.query(query))) == len(list(g_js.query(query)))
