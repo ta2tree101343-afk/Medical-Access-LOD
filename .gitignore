@@ -31,3 +31,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# 手元用ドキュメント（レポート・設計書・クラス図など）は公開しない
+docs/
+CLAUDE.md

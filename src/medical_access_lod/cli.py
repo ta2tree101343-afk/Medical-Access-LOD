@@ -279,6 +279,7 @@ def publish_lod(
     graph = Graph().parse(source=result.turtle_path, format="turtle")
     hospitals = len(list(graph.subjects(RDF.type, _SCHEMA.Hospital)))
     clinics = len(list(graph.subjects(RDF.type, _SCHEMA.MedicalClinic)))
+    dentists = len(list(graph.subjects(RDF.type, _SCHEMA.Dentist)))
     services = len(list(graph.subjects(RDF.type, _EX.ClinicalService)))
     schedules = len(list(graph.subjects(RDF.type, _SCHEMA.OpeningHoursSpecification)))
 
@@ -302,9 +303,10 @@ def publish_lod(
         },
         "counts": {
             "triples": len(graph),
-            "facilities": hospitals + clinics,
+            "facilities": hospitals + clinics + dentists,
             "hospitals": hospitals,
             "clinics": clinics,
+            "dentists": dentists,
             "clinical_services": services,
             "opening_hours": schedules,
         },
