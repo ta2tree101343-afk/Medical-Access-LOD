@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-19T01:02:42.540530+00:00",
+  "generated_at": "2026-07-19T12:32:56.768532+00:00",
   "source": "厚生労働省 医療情報ネット",
   "source_url": "https://data.e-gov.go.jp/data/dataset/321fdf20-5f6a-49e5-bcab-35d81d652c65/resource/af88450b-049c-4deb-8dc9-327312d877e1/download/e-gov20251201.zip",
   "license": "PDL 1.0 (Public Data License 1.0)",
@@ -18,10 +18,11 @@
     ]
   },
   "counts": {
-    "triples": 127842,
-    "facilities": 509,
+    "triples": 127883,
+    "facilities": 897,
     "hospitals": 40,
     "clinics": 469,
+    "dentists": 388,
     "clinical_services": 2586,
     "opening_hours": 21795
   },
