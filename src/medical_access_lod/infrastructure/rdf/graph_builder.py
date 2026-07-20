@@ -204,14 +204,24 @@ def serialize_turtle(graph: Graph, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    graph.serialize(destination=path, format="turtle")
+    graph.serialize(destination=path, format="turtle", base=str(BASE))
 
 
 def serialize_jsonld(graph: Graph, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    graph.serialize(destination=path, format="json-ld")
+    saved_base = graph.base
+    graph.base = None
+    try:
+        graph.serialize(
+            destination=path,
+            format="json-ld",
+            auto_compact=False,
+            indent=2,
+        )
+    finally:
+        graph.base = saved_base
 
 
 _ = Namespace
