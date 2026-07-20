@@ -125,6 +125,10 @@ export class PipelineStack extends cdk.Stack {
     props.buildBucket.grantReadWrite(fns.BuildRdf);
     props.buildBucket.grantReadWrite(fns.Validate);
     props.buildBucket.grantRead(fns.Publish);
+    // BuildReadModel は世代 inventory (PK/SK 一覧) を build_bucket の
+    // generations/ prefix 下に gzip 分割で書き出す。
+    // Cleanup Lambda が BatchWriteItem で使う削除リストの唯一のソース。
+    props.buildBucket.grantWrite(fns.BuildReadModel, 'generations/*');
     props.distBucket.grantReadWrite(fns.Publish);
     props.readModelTable.grantReadWriteData(fns.BuildReadModel);
     // Publish は lock の lease 更新・解放に加え、条件失敗時に現在所有者を
@@ -240,6 +244,8 @@ export class PipelineStack extends cdk.Stack {
         normalized_bucket: sfn.JsonPath.stringAt('$.normalized_bucket'),
         normalized_key: sfn.JsonPath.stringAt('$.normalize.normalized_key'),
         read_model_table: sfn.JsonPath.stringAt('$.read_model_table'),
+        // 世代 inventory (PK/SK 一覧) の書き出し先
+        build_bucket: sfn.JsonPath.stringAt('$.build_bucket'),
         // generation catalog に STAGED で登録する際に必要
         snapshot_date: sfn.JsonPath.stringAt('$.snapshot_date'),
       }),

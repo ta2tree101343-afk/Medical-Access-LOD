@@ -318,14 +318,49 @@ describe('PipelineStack', () => {
     expect(definition.States['BuildReadModelTask'].Next).toBe('PublishTask');
   });
 
-  test('BuildReadModelTask payload satisfies BuildReadModelEvent (normalized_bucket/normalized_key/read_model_table)', () => {
+  test('BuildReadModelTask payload satisfies BuildReadModelEvent (normalized_bucket/normalized_key/read_model_table/build_bucket/snapshot_date)', () => {
     const task = definition.States['BuildReadModelTask'];
     const p = task.Parameters['Payload'] ?? task.Parameters;
     expect(p['run_id.$']).toBe('$.run_id');
     expect(p['normalized_bucket.$']).toBe('$.normalized_bucket');
     expect(p['normalized_key.$']).toBe('$.normalize.normalized_key');
     expect(p['read_model_table.$']).toBe('$.read_model_table');
+    // 世代 inventory の書き出し先
+    expect(p['build_bucket.$']).toBe('$.build_bucket');
+    // generation catalog に STAGED で登録するため
+    expect(p['snapshot_date.$']).toBe('$.snapshot_date');
     expect(task.ResultPath).toBe('$.read_model');
+  });
+
+  test('BuildReadModel can write inventory chunks under generations/ prefix only', () => {
+    const policies = template.findResources('AWS::IAM::Policy');
+    const statements = Object.values(policies).flatMap(
+      (policy: any) => policy.Properties.PolicyDocument.Statement,
+    );
+    // BuildReadModel の書き込み権限は build_bucket の generations/ prefix のみ。
+    // dist_bucket や build_bucket ルートには書けない (最小権限)。
+    const inventoryWriteStatement = statements.find((statement: any) => {
+      const actions = Array.isArray(statement.Action)
+        ? statement.Action
+        : [statement.Action];
+      const resources = Array.isArray(statement.Resource)
+        ? statement.Resource
+        : [statement.Resource];
+      const containsWrite = actions.some((a: string) =>
+        ['s3:PutObject', 's3:PutObjectLegalHold', 's3:PutObjectRetention',
+          's3:PutObjectTagging', 's3:PutObjectVersionTagging', 's3:Abort*']
+          .includes(a),
+      );
+      // Resource が build_bucket の generations/* prefix であることを確認する。
+      // resource は Fn::Join か直接文字列で表現される。
+      const targetsInventoryPrefix = resources.some((r: any) =>
+        typeof r === 'object'
+        && r['Fn::Join']
+        && JSON.stringify(r['Fn::Join']).includes('generations/*'),
+      );
+      return containsWrite && targetsInventoryPrefix;
+    });
+    expect(inventoryWriteStatement).toBeDefined();
   });
 });
 

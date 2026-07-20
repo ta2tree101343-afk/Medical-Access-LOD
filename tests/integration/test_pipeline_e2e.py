@@ -204,6 +204,22 @@ def test_asl_end_to_end_completes_and_publishes(
     assert final_state["read_model"]["items_written"] >= 3
     assert final_state["read_model"]["lock_owner"] == run_id
     assert final_state["read_model"]["lock_expires_at"] > 0
+    # 世代 inventory が build_bucket に書き出されていること
+    assert final_state["read_model"]["inventory_prefix"] == (
+        f"generations/{run_id}/inventory/"
+    )
+    assert final_state["read_model"]["inventory_bucket"] == aws_env["build_bucket"]
+    assert final_state["read_model"]["inventory_chunks"] >= 1
+
+    inventory_objs = boto3.client("s3", region_name=REGION).list_objects_v2(
+        Bucket=aws_env["build_bucket"],
+        Prefix=f"generations/{run_id}/inventory/",
+    ).get("Contents", [])
+    inventory_keys = {obj["Key"] for obj in inventory_objs}
+    assert f"generations/{run_id}/inventory/MANIFEST.json" in inventory_keys
+    assert any(
+        key.endswith(".jsonl.gz") and "chunk-" in key for key in inventory_keys
+    )
 
     # run_id が Execution.Name から派生していること
     assert final_state["run_id"] == run_id

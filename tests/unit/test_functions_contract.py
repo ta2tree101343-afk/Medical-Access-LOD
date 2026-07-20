@@ -156,6 +156,7 @@ def test_build_read_model_event_validation() -> None:
             "normalized_bucket": "norm-bucket",
             "normalized_key": "normalized/r.json",
             "read_model_table": "read-model",
+            "build_bucket": "build-bucket",
             "snapshot_date": "2025-12-01",
         }
     )
@@ -172,7 +173,25 @@ def test_build_read_model_event_rejects_missing_snapshot_date() -> None:
                 "normalized_bucket": "norm-bucket",
                 "normalized_key": "normalized/r.json",
                 "read_model_table": "read-model",
+                "build_bucket": "build-bucket",
                 # snapshot_date 未指定
+            }
+        )
+
+
+def test_build_read_model_event_rejects_missing_build_bucket() -> None:
+    """世代 inventory の書き出し先として build_bucket は必須。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        BuildReadModelEvent.model_validate(
+            {
+                "run_id": "r",
+                "normalized_bucket": "norm-bucket",
+                "normalized_key": "normalized/r.json",
+                "read_model_table": "read-model",
+                "snapshot_date": "2025-12-01",
+                # build_bucket 未指定
             }
         )
 
