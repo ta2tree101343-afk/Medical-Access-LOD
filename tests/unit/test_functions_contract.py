@@ -86,8 +86,67 @@ def test_publish_event_validation() -> None:
             "ttl_key": "builds/r/x.ttl",
             "jsonld_key": "builds/r/x.jsonld",
             "dist_bucket": "dist-bucket",
+            "read_model_table": "read-model",
+            "lock_owner": "r",
+            "snapshot_date": "2025-12-01",
         }
     )
+
+
+def test_publish_event_rejects_missing_snapshot_date() -> None:
+    """不変 release (releases/<snapshot_date>/<run_id>/) に日付は必須。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        PublishEvent.model_validate(
+            {
+                "run_id": "r",
+                "build_bucket": "build-bucket",
+                "ttl_key": "builds/r/x.ttl",
+                "jsonld_key": "builds/r/x.jsonld",
+                "dist_bucket": "dist-bucket",
+                "read_model_table": "read-model",
+                "lock_owner": "r",
+                # snapshot_date 未指定
+            }
+        )
+
+
+@pytest.mark.parametrize("missing", ["read_model_table", "lock_owner"])
+def test_publish_event_rejects_missing_lock_context(missing: str) -> None:
+    from pydantic import ValidationError
+
+    event = {
+        "run_id": "r",
+        "build_bucket": "build-bucket",
+        "ttl_key": "builds/r/x.ttl",
+        "jsonld_key": "builds/r/x.jsonld",
+        "dist_bucket": "dist-bucket",
+        "read_model_table": "read-model",
+        "lock_owner": "r",
+        "snapshot_date": "2025-12-01",
+    }
+    event.pop(missing)
+    with pytest.raises(ValidationError):
+        PublishEvent.model_validate(event)
+
+
+def test_publish_event_rejects_lock_owned_by_another_run() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="lock_owner must match run_id"):
+        PublishEvent.model_validate(
+            {
+                "run_id": "run-A",
+                "build_bucket": "build-bucket",
+                "ttl_key": "builds/run-A/x.ttl",
+                "jsonld_key": "builds/run-A/x.jsonld",
+                "dist_bucket": "dist-bucket",
+                "read_model_table": "read-model",
+                "lock_owner": "run-B",
+                "snapshot_date": "2025-12-01",
+            }
+        )
 
 
 def test_build_read_model_event_validation() -> None:
@@ -129,11 +188,16 @@ def test_build_read_model_items_shape() -> None:
         ],
         "specialty_labels": {"01": "内科"},
     }
-    items = _build_items(payload)
+    items = _build_items(payload, generation="test-run-001")
     pks = {(i["PK"], i["SK"]) for i in items}
-    assert ("FACILITY#F1", "METADATA") in pks
-    assert ("FACILITY#F1", "SERVICE#01") in pks
-    assert ("FACILITY#F1", "SCHEDULE#01#Monday#09:00:00") in pks
+    assert ("GENERATION#test-run-001#FACILITY#F1", "METADATA") in pks
+    assert ("GENERATION#test-run-001#FACILITY#F1", "SERVICE#01") in pks
+    assert (
+        "GENERATION#test-run-001#FACILITY#F1",
+        "SCHEDULE#01#Monday#09:00:00",
+    ) in pks
     # SKOS label should propagate
     svc = next(i for i in items if i["SK"] == "SERVICE#01")
     assert svc["specialty_label"] == "内科"
+    # manifestが指す世代だけをAPIが参照できる。
+    assert all(i["generation"] == "test-run-001" for i in items)

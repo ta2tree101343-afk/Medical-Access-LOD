@@ -5,11 +5,13 @@ import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
 export interface ApiStackProps extends cdk.StackProps {
   envName: string;
   readModelTable: dynamodb.Table;
+  distBucket: s3.Bucket;
   ecrRepository: ecr.Repository;
 }
 
@@ -38,12 +40,14 @@ export class ApiStack extends cdk.Stack {
       environment: {
         ENVIRONMENT: props.envName,
         READ_MODEL_TABLE: props.readModelTable.tableName,
+        DIST_BUCKET: props.distBucket.bucketName,
         POWERTOOLS_SERVICE_NAME: 'medical-access-lod-api',
         POWERTOOLS_METRICS_NAMESPACE: 'MedicalAccessLOD',
       },
     });
 
     props.readModelTable.grantReadData(this.apiFunction);
+    props.distBucket.grantRead(this.apiFunction, 'latest/manifest.json');
 
     this.httpApi = new apigw.HttpApi(this, 'HttpApi', {
       apiName: `medical-access-lod-${props.envName}`,
