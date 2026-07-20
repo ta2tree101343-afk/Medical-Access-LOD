@@ -129,12 +129,15 @@ export class PipelineStack extends cdk.Stack {
     props.readModelTable.grantReadWriteData(fns.BuildReadModel);
     // Publish は lock の lease 更新・解放に加え、条件失敗時に現在所有者を
     // GetItem で確認して「完了済み再試行」と「別実行との競合」を区別する。
+    // また manifest CAS 成功後に SYSTEM#GENERATION#RUN#<run_id> を COMMITTED
+    // に遷移させる (Cleanup Lambda がこの状態のみを対象にする)。
+    // generation 本体 (GENERATION#*) は書けない (旧世代の誤破壊防止)。
     fns.Publish.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem'],
       resources: [props.readModelTable.tableArn],
       conditions: {
         'ForAllValues:StringEquals': {
-          'dynamodb:LeadingKeys': ['SYSTEM#PIPELINE'],
+          'dynamodb:LeadingKeys': ['SYSTEM#PIPELINE', 'SYSTEM#GENERATION'],
         },
       },
     }));
@@ -237,6 +240,8 @@ export class PipelineStack extends cdk.Stack {
         normalized_bucket: sfn.JsonPath.stringAt('$.normalized_bucket'),
         normalized_key: sfn.JsonPath.stringAt('$.normalize.normalized_key'),
         read_model_table: sfn.JsonPath.stringAt('$.read_model_table'),
+        // generation catalog に STAGED で登録する際に必要
+        snapshot_date: sfn.JsonPath.stringAt('$.snapshot_date'),
       }),
       payloadResponseOnly: true,
       resultPath: '$.read_model',

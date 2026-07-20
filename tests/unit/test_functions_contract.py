@@ -156,8 +156,25 @@ def test_build_read_model_event_validation() -> None:
             "normalized_bucket": "norm-bucket",
             "normalized_key": "normalized/r.json",
             "read_model_table": "read-model",
+            "snapshot_date": "2025-12-01",
         }
     )
+
+
+def test_build_read_model_event_rejects_missing_snapshot_date() -> None:
+    """generation catalog に STAGED で登録するため snapshot_date は必須。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        BuildReadModelEvent.model_validate(
+            {
+                "run_id": "r",
+                "normalized_bucket": "norm-bucket",
+                "normalized_key": "normalized/r.json",
+                "read_model_table": "read-model",
+                # snapshot_date 未指定
+            }
+        )
 
 
 def test_build_read_model_items_shape() -> None:
