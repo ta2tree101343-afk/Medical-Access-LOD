@@ -56,6 +56,9 @@ class BuildReadModelEvent(BaseEvent):
     normalized_bucket: str = Field(min_length=3)
     normalized_key: str = Field(min_length=1)
     read_model_table: str = Field(min_length=1)
+    # 世代 inventory (PK/SK 一覧) の書き出し先。Cleanup Lambda はここから
+    # BatchWriteItem 削除対象を読み取る。
+    build_bucket: str = Field(min_length=3)
     # generation catalog に STAGED で登録する際に必要。Cleanup 時の保持ポリシー
     # (直近 N 世代 + 最低保持期間) の判定にも使う。
     snapshot_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")

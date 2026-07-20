@@ -5,7 +5,7 @@ from typing import Any
 import boto3
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from medical_access_lod.functions.shared import generation_catalog
+from medical_access_lod.functions.shared import generation_catalog, generation_inventory
 from medical_access_lod.functions.shared.events import BuildReadModelEvent
 from medical_access_lod.functions.shared.observability import logger, metrics, tracer
 from medical_access_lod.functions.shared.pipeline_lock import (
@@ -18,9 +18,8 @@ from medical_access_lod.functions.shared.s3io import get_json
 def _inventory_prefix(run_id: str) -> str:
     """Cleanup Lambda が読む世代 inventory の S3 prefix。
 
-    現時点では BuildReadModel 側で実 inventory を書き出していないが、
-    catalog エントリを参照する Cleanup 側が prefix 命名を推測しないよう、
-    ここで唯一の真として決めて catalog に登録する。
+    catalog エントリと実 S3 の間で prefix 命名を推測させないよう、
+    唯一の真としてここで決める。
     """
 
     return f"generations/{run_id}/inventory/"
@@ -125,6 +124,16 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
             item_count=len(items),
         )
         written = _write_items(request.read_model_table, items)
+        # items 書き込み成功後に inventory (PK/SK 一覧) を S3 に永続化する。
+        # ここで失敗した場合、DynamoDB には世代データがあるが Cleanup 対象と
+        # ならないので Publish (mark_committed) は走らせない。
+        # (register_staged で STAGED のままとなり、Cleanup の retention 判定は
+        # COMMITTED のみを対象にするため実害無し)
+        inventory_manifest = generation_inventory.write_inventory(
+            request.build_bucket,
+            inventory_prefix,
+            ((item["PK"], item["SK"]) for item in items),
+        )
     except Exception:
         try:
             release_pipeline_lock(request.read_model_table, request.run_id)
@@ -133,12 +142,19 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         raise
 
     metrics.add_metric(name="ReadModelItems", unit="Count", value=written)
+    metrics.add_metric(
+        name="InventoryChunks",
+        unit="Count",
+        value=int(inventory_manifest["chunk_count"]),
+    )
     logger.info(
         "build_read_model completed",
         extra={
             "items": written,
             "lock_expires_at": lock_expires_at,
             "inventory_prefix": inventory_prefix,
+            "inventory_bucket": request.build_bucket,
+            "inventory_chunks": inventory_manifest["chunk_count"],
         },
     )
 
@@ -146,7 +162,9 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         "run_id": request.run_id,
         "read_model_table": request.read_model_table,
         "items_written": written,
+        "inventory_bucket": request.build_bucket,
         "inventory_prefix": inventory_prefix,
+        "inventory_chunks": inventory_manifest["chunk_count"],
         "lock_owner": request.run_id,
         "lock_expires_at": lock_expires_at,
     }

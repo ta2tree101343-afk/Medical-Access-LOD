@@ -591,6 +591,7 @@ def test_build_read_model_failure_is_not_masked_when_lock_release_fails(
                 "normalized_bucket": NORM_BUCKET,
                 "normalized_key": "normalized/invalid.json",
                 "read_model_table": "read-model",
+                "build_bucket": BUILD_BUCKET,
                 "snapshot_date": "2025-12-01",
             },
             _FakeLambdaContext(),  # type: ignore[arg-type]
@@ -653,6 +654,7 @@ def test_build_read_model_handler_writes_dynamodb_items(aws_env: None) -> None:
             "normalized_bucket": NORM_BUCKET,
             "normalized_key": "normalized/test.json",
             "read_model_table": table_name,
+            "build_bucket": BUILD_BUCKET,
             "snapshot_date": "2025-12-01",
         },
         _FakeLambdaContext(),  # type: ignore[arg-type]
@@ -661,6 +663,19 @@ def test_build_read_model_handler_writes_dynamodb_items(aws_env: None) -> None:
     assert response["lock_owner"] == "test-006"
     assert isinstance(response["lock_expires_at"], int)
     assert response["inventory_prefix"] == "generations/test-006/inventory/"
+    assert response["inventory_bucket"] == BUILD_BUCKET
+    assert response["inventory_chunks"] == 1
+
+    # inventory chunk + MANIFEST が S3 に存在
+    s3_check = boto3.client("s3", region_name="ap-northeast-1")
+    inventory_objs = s3_check.list_objects_v2(
+        Bucket=BUILD_BUCKET, Prefix="generations/test-006/inventory/"
+    ).get("Contents", [])
+    inventory_keys = sorted(obj["Key"] for obj in inventory_objs)
+    assert inventory_keys == [
+        "generations/test-006/inventory/MANIFEST.json",
+        "generations/test-006/inventory/chunk-000000.jsonl.gz",
+    ]
 
     # generation catalog に STAGED で登録されていること
     from medical_access_lod.functions.shared import generation_catalog
@@ -751,6 +766,7 @@ def test_build_read_model_keeps_previous_generation_until_manifest_switch(
             "normalized_bucket": NORM_BUCKET,
             "normalized_key": "normalized/stale-test.json",
             "read_model_table": table_name,
+            "build_bucket": BUILD_BUCKET,
             "snapshot_date": "2025-12-01",
         },
         _FakeLambdaContext(),  # type: ignore[arg-type]
