@@ -135,26 +135,34 @@ describe('PipelineStack', () => {
     });
   });
 
-  test('Publish can inspect, renew, and release the pipeline lock', () => {
+  test('Publish can inspect the pipeline lock and mark generations committed', () => {
     const policies = template.findResources('AWS::IAM::Policy');
     const statements = Object.values(policies).flatMap(
       (policy: any) => policy.Properties.PolicyDocument.Statement,
     );
-    expect(
-      statements.some((statement: any) => {
-        const actions = Array.isArray(statement.Action)
-          ? statement.Action
-          : [statement.Action];
-        const leadingKeys = statement.Condition?.['ForAllValues:StringEquals']
-          ? statement.Condition['ForAllValues:StringEquals']['dynamodb:LeadingKeys']
-          : undefined;
-        return (
-          ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem']
-            .every((action) => actions.includes(action))
-          && leadingKeys?.includes('SYSTEM#PIPELINE')
-        );
-      }),
-    ).toBe(true);
+    // Publish の DynamoDB 権限は SYSTEM#PIPELINE (lock) と SYSTEM#GENERATION
+    // (catalog COMMITTED 遷移) にのみ許可。GENERATION#* (実データ) には
+    // 書けないこと自体はここでは検証しない (許可対象を絞る形の設計のため)。
+    const matching = statements.filter((statement: any) => {
+      const actions = Array.isArray(statement.Action)
+        ? statement.Action
+        : [statement.Action];
+      const leadingKeys = statement.Condition?.['ForAllValues:StringEquals']
+        ? statement.Condition['ForAllValues:StringEquals']['dynamodb:LeadingKeys']
+        : undefined;
+      return (
+        ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem']
+          .every((action) => actions.includes(action))
+        && Array.isArray(leadingKeys)
+      );
+    });
+    expect(matching.length).toBeGreaterThan(0);
+    const publishLeadingKeys = matching.flatMap(
+      (statement: any) =>
+        statement.Condition['ForAllValues:StringEquals']['dynamodb:LeadingKeys'],
+    );
+    expect(publishLeadingKeys).toContain('SYSTEM#PIPELINE');
+    expect(publishLeadingKeys).toContain('SYSTEM#GENERATION');
   });
 
   test('state machine exists with tracing enabled', () => {

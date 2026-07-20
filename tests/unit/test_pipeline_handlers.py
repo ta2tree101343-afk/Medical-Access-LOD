@@ -246,6 +246,14 @@ def test_publish_handler_commits_release_with_single_manifest(
 
     monkeypatch.setattr(publish_handler.pipeline_lock, "renew", renew)
     monkeypatch.setattr(publish_handler.pipeline_lock, "release", failing_release)
+    # generation catalog は Publish 側の関心事ではないため、mark_committed も
+    # 明示的に mock する。実 catalog 遷移は test_generation_catalog + E2E で検証。
+    mark_committed_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        publish_handler.generation_catalog,
+        "mark_committed",
+        lambda table, run_id: mark_committed_calls.append((table, run_id)) or 1,
+    )
 
     event = _publish_event("test/005")
     response = publish_handler.lambda_handler(
@@ -583,6 +591,7 @@ def test_build_read_model_failure_is_not_masked_when_lock_release_fails(
                 "normalized_bucket": NORM_BUCKET,
                 "normalized_key": "normalized/invalid.json",
                 "read_model_table": "read-model",
+                "snapshot_date": "2025-12-01",
             },
             _FakeLambdaContext(),  # type: ignore[arg-type]
         )
@@ -644,12 +653,23 @@ def test_build_read_model_handler_writes_dynamodb_items(aws_env: None) -> None:
             "normalized_bucket": NORM_BUCKET,
             "normalized_key": "normalized/test.json",
             "read_model_table": table_name,
+            "snapshot_date": "2025-12-01",
         },
         _FakeLambdaContext(),  # type: ignore[arg-type]
     )
     assert response["items_written"] == 3
     assert response["lock_owner"] == "test-006"
     assert isinstance(response["lock_expires_at"], int)
+    assert response["inventory_prefix"] == "generations/test-006/inventory/"
+
+    # generation catalog に STAGED で登録されていること
+    from medical_access_lod.functions.shared import generation_catalog
+    entry = generation_catalog.get(table_name, "test-006")
+    assert entry is not None
+    assert entry["status"] == "STAGED"
+    assert entry["snapshot_date"] == "2025-12-01"
+    assert entry["inventory_prefix"] == "generations/test-006/inventory/"
+    assert int(entry["item_count"]) == 3
 
     table = ddb.Table(table_name)
     data_items = [
@@ -731,6 +751,7 @@ def test_build_read_model_keeps_previous_generation_until_manifest_switch(
             "normalized_bucket": NORM_BUCKET,
             "normalized_key": "normalized/stale-test.json",
             "read_model_table": table_name,
+            "snapshot_date": "2025-12-01",
         },
         _FakeLambdaContext(),  # type: ignore[arg-type]
     )

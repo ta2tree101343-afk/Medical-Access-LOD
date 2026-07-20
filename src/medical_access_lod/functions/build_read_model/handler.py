@@ -5,6 +5,7 @@ from typing import Any
 import boto3
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
+from medical_access_lod.functions.shared import generation_catalog
 from medical_access_lod.functions.shared.events import BuildReadModelEvent
 from medical_access_lod.functions.shared.observability import logger, metrics, tracer
 from medical_access_lod.functions.shared.pipeline_lock import (
@@ -12,6 +13,17 @@ from medical_access_lod.functions.shared.pipeline_lock import (
     release_pipeline_lock,
 )
 from medical_access_lod.functions.shared.s3io import get_json
+
+
+def _inventory_prefix(run_id: str) -> str:
+    """Cleanup Lambda が読む世代 inventory の S3 prefix。
+
+    現時点では BuildReadModel 側で実 inventory を書き出していないが、
+    catalog エントリを参照する Cleanup 側が prefix 命名を推測しないよう、
+    ここで唯一の真として決めて catalog に登録する。
+    """
+
+    return f"generations/{run_id}/inventory/"
 
 # 各アイテムに付与する "generation" 属性のキー。値は現在の run_id。
 # API は公開 manifest が指す generation のみを読む。旧世代を残すことで、
@@ -102,6 +114,16 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     try:
         payload = get_json(request.normalized_bucket, request.normalized_key)
         items = _build_items(payload, generation=request.run_id)
+        inventory_prefix = _inventory_prefix(request.run_id)
+        # 書き込みより前に STAGED を登録することで、部分書き込みで落ちた世代も
+        # catalog 上で「未完了」として観測できる (COMMITTED に上がらない)。
+        generation_catalog.register_staged(
+            request.read_model_table,
+            request.run_id,
+            snapshot_date=request.snapshot_date,
+            inventory_prefix=inventory_prefix,
+            item_count=len(items),
+        )
         written = _write_items(request.read_model_table, items)
     except Exception:
         try:
@@ -113,13 +135,18 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     metrics.add_metric(name="ReadModelItems", unit="Count", value=written)
     logger.info(
         "build_read_model completed",
-        extra={"items": written, "lock_expires_at": lock_expires_at},
+        extra={
+            "items": written,
+            "lock_expires_at": lock_expires_at,
+            "inventory_prefix": inventory_prefix,
+        },
     )
 
     return {
         "run_id": request.run_id,
         "read_model_table": request.read_model_table,
         "items_written": written,
+        "inventory_prefix": inventory_prefix,
         "lock_owner": request.run_id,
         "lock_expires_at": lock_expires_at,
     }

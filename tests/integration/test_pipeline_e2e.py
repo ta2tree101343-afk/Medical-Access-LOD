@@ -246,10 +246,12 @@ def test_asl_end_to_end_completes_and_publishes(
     scan_kwargs: dict[str, object] = {}
     while True:
         scan_response = table.scan(**scan_kwargs)
+        # SYSTEM#PIPELINE (lock) と SYSTEM#GENERATION (catalog) は運用メタで、
+        # データ本体 (GENERATION#*) だけを検証対象にする。
         page_items = [
             item
             for item in scan_response.get("Items", [])
-            if item["PK"] != "SYSTEM#PIPELINE"
+            if not item["PK"].startswith("SYSTEM#")
         ]
         data_items.extend(page_items)
         types.update(item["SK"].split("#", 1)[0] for item in page_items)
@@ -264,6 +266,17 @@ def test_asl_end_to_end_completes_and_publishes(
     # Publish完了後は所有していた期限付きlockが解放される。
     lock = table.get_item(Key={"PK": "SYSTEM#PIPELINE", "SK": "READ_MODEL_LOCK"})
     assert "Item" not in lock
+
+    # generation catalog が STAGED → COMMITTED まで遷移していること。
+    catalog_entry = table.get_item(
+        Key={"PK": "SYSTEM#GENERATION", "SK": f"RUN#{run_id}"},
+        ConsistentRead=True,
+    ).get("Item")
+    assert catalog_entry is not None
+    assert catalog_entry["status"] == "COMMITTED"
+    assert catalog_entry["snapshot_date"] == snapshot_date
+    assert catalog_entry["inventory_prefix"] == f"generations/{run_id}/inventory/"
+    assert int(catalog_entry["committed_at"]) > 0
 
 
 def test_asl_halts_on_shacl_violation(

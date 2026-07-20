@@ -7,7 +7,7 @@ from urllib.parse import quote
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from botocore.exceptions import ClientError
 
-from medical_access_lod.functions.shared import pipeline_lock
+from medical_access_lod.functions.shared import generation_catalog, pipeline_lock
 from medical_access_lod.functions.shared.events import PublishEvent
 from medical_access_lod.functions.shared.observability import logger, metrics, tracer
 from medical_access_lod.functions.shared.s3io import s3_client
@@ -320,6 +320,23 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
             )
         else:
             logger.info("publish completed by another retry during manifest commit")
+
+        # Manifest commit が成功した後にのみ generation catalog を COMMITTED へ
+        # 遷移させる。以降 Cleanup Lambda はこの世代を "公開済み" として扱える。
+        # STAGED から呼ばれても COMMITTED から呼ばれても冪等成功 (再試行対応)。
+        try:
+            generation_catalog.mark_committed(
+                request.read_model_table,
+                request.run_id,
+            )
+        except generation_catalog.GenerationCatalogMissingError:
+            # 移行期の manifest (旧 pipeline が catalog を書かずに publish した
+            # 場合など) を retry で通したケース。commit 自体は成功しているので
+            # ここで失敗させない。
+            logger.warning(
+                "generation catalog entry missing during mark_committed; "
+                "publish succeeded but Cleanup will skip this generation"
+            )
         return _response(request, committed_manifest)
     finally:
         _release_lock(request)
