@@ -15,6 +15,14 @@ on:
         description: 'GitHub repo (OIDC trust condition)'
         type: string
         default: Medical-Access-LOD
+      snapshot_date:
+        description: 'Scheduler snapshot date (YYYY-MM-DD)'
+        type: string
+        required: true
+      source_url:
+        description: 'Scheduler source ZIP URL (HTTPS; must contain YYYYMMDD)'
+        type: string
+        required: true
 
 concurrency:
   group: deploy-${{ inputs.env }}
@@ -81,19 +89,23 @@ jobs:
           ENV_NAME: ${{ inputs.env }}
           GH_OWNER: ${{ inputs.github_owner }}
           GH_REPO: ${{ inputs.github_repo }}
+          SNAPSHOT_DATE: ${{ inputs.snapshot_date }}
+          SOURCE_URL: ${{ inputs.source_url }}
         run: |
           npx cdk deploy --all --require-approval never \
             -c env="$ENV_NAME" \
             -c githubOwner="$GH_OWNER" \
-            -c githubRepo="$GH_REPO"
+            -c githubRepo="$GH_REPO" \
+            -c snapshotDate="$SNAPSHOT_DATE" \
+            -c sourceUrl="$SOURCE_URL"
 
       - name: Sync lod/ to dist bucket
         env:
           ENV_NAME: ${{ inputs.env }}
         run: |
           aws s3 sync lod/ "s3://medical-access-lod-$ENV_NAME-dist/latest/" \
-            --delete \
             --cache-control "public, max-age=3600" \
+            --exclude "manifest.json" \
             --exclude "*.md"
 
       - name: Invalidate CloudFront cache

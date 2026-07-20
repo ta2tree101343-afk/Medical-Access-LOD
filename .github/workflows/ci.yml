@@ -25,6 +25,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      # tests/integration/test_pipeline_e2e.py が `cdk synth` で ASL を取り出し
+      # ASLSimulator に渡すため、Python ジョブでも Node + CDK が必要。
+      # actions/setup-node v4.1.0
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: npm ci
+
       - name: Ruff (lint)
         run: uv run ruff check .
 

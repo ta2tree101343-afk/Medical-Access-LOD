@@ -17,6 +17,12 @@ const env: cdk.Environment | undefined = account ? { account, region } : undefin
 
 const githubOwner = app.node.tryGetContext('githubOwner') ?? 'ta2tree101343-afk';
 const githubRepo = app.node.tryGetContext('githubRepo') ?? 'Medical-Access-LOD';
+const defaultSnapshotDate = '2025-12-01';
+const defaultSourceUrl =
+  'https://data.e-gov.go.jp/data/dataset/321fdf20-5f6a-49e5-bcab-35d81d652c65' +
+  '/resource/af88450b-049c-4deb-8dc9-327312d877e1/download/e-gov20251201.zip';
+const snapshotDate = String(app.node.tryGetContext('snapshotDate') ?? defaultSnapshotDate);
+const sourceUrl = String(app.node.tryGetContext('sourceUrl') ?? defaultSourceUrl);
 
 const prefix = `MedicalAccessLod-${envName}`;
 
@@ -30,6 +36,8 @@ const delivery = new DeliveryStack(app, `${prefix}-Delivery`, {
 const pipeline = new PipelineStack(app, `${prefix}-Pipeline`, {
   env,
   envName,
+  snapshotDate,
+  sourceUrl,
   rawBucket: storage.rawBucket,
   normalizedBucket: storage.normalizedBucket,
   buildBucket: storage.buildBucket,
@@ -42,6 +50,7 @@ const api = new ApiStack(app, `${prefix}-Api`, {
   env,
   envName,
   readModelTable: storage.readModelTable,
+  distBucket: delivery.distBucket,
   ecrRepository: storage.ecrRepository,
 });
 
