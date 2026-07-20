@@ -119,10 +119,16 @@ def test_synthesized_context_resolves_expected_physical_resources(
 
 def _build_handlers(
     monkeypatch: pytest.MonkeyPatch,
+    sqs_messages: list[dict[str, Any]],
     *,
     validate_hook: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Callable[[dict[str, Any]], dict[str, Any]]]:
-    """各 Lambda ハンドラを ASLSimulator 用に (event -> event) の形に包む。"""
+    """各 Lambda ハンドラを ASLSimulator 用に (event -> event) の形に包む。
+
+    NotifyCleanupQueue は SFN の Service Integration Task (::sqs:sendMessage) で
+    Lambda ではないため、専用の handler を用意する。captured message は
+    呼び出し側から検証できるよう `sqs_messages` に追記する。
+    """
 
     from medical_access_lod.application import download_source
     from medical_access_lod.functions.build_rdf import handler as build
@@ -139,8 +145,13 @@ def _build_handlers(
     def _wrap(fn: Any) -> Callable[[dict[str, Any]], dict[str, Any]]:
         return lambda event: fn.lambda_handler(event, ctx)
 
-    # キーはASL state名ではなく、合成LambdaのFUNCTION_KEY。Task Resourceが
-    # 誤ったLambdaを指した場合はASLSimulatorが実際にそのhandlerを呼び、契約違反になる。
+    def _sqs_send_message(event: dict[str, Any]) -> dict[str, Any]:
+        sqs_messages.append(event)
+        return {
+            "MessageId": f"mock-{len(sqs_messages):06d}",
+            "MD5OfMessageBody": "mock-md5",
+        }
+
     handlers = {
         "Download": _wrap(download),
         "Normalize": _wrap(normalize),
@@ -148,6 +159,7 @@ def _build_handlers(
         "Validate": _wrap(validate),
         "Publish": _wrap(publish),
         "BuildReadModel": _wrap(brm),
+        "arn:aws:states:::sqs:sendMessage": _sqs_send_message,
     }
 
     if validate_hook is not None:
@@ -169,14 +181,16 @@ def test_asl_end_to_end_completes_and_publishes(
 ) -> None:
     """Scheduler 入力を InjectContext から流し、6 Lambda を ASL の順で全部通す。"""
 
-    handlers = _build_handlers(monkeypatch)
+    sqs_messages: list[dict[str, Any]] = []
+    handlers = _build_handlers(monkeypatch, sqs_messages)
     run_id = "e2e-run-001"
     sim = ASLSimulator(synthesized_pipeline.definition, execution_name=run_id)
 
     # 手書きの初期入力ではなく、合成されたScheduler Target.Inputをそのまま使う。
     final_state = sim.run(synthesized_pipeline.scheduler_input, handlers)
 
-    # 各段の実行順を検証 (InjectContext → 4 タスク → Choice → ReadModel → Publish)
+    # 各段の実行順を検証 (InjectContext → 4 タスク → Choice → ReadModel →
+    # Publish → NotifyCleanupQueue)
     task_names = [name for name, typ in sim.trace if typ == "Task"]
     assert task_names == [
         "DownloadTask",
@@ -185,6 +199,7 @@ def test_asl_end_to_end_completes_and_publishes(
         "ValidateTask",
         "BuildReadModelTask",
         "PublishTask",
+        "NotifyCleanupQueue",
     ]
     assert sim.invocations == [
         ("DownloadTask", "Download"),
@@ -193,8 +208,19 @@ def test_asl_end_to_end_completes_and_publishes(
         ("ValidateTask", "Validate"),
         ("BuildReadModelTask", "BuildReadModel"),
         ("PublishTask", "Publish"),
+        ("NotifyCleanupQueue", "arn:aws:states:::sqs:sendMessage"),
     ]
+    # 実 CFN が resolve した Resource と、simulator が実際に dispatch した
+    # Resource が完全一致すること (参照取り違えの検出)
     assert synthesized_pipeline.task_function_keys == dict(sim.invocations)
+
+    # Cleanup キューに 1 件だけメッセージが送られていること
+    assert len(sqs_messages) == 1
+    cleanup_msg = sqs_messages[0]
+    assert cleanup_msg["MessageBody"]["trigger_run_id"] == run_id
+    assert cleanup_msg["MessageBody"]["read_model_table"] == aws_env["read_model_table"]
+    assert cleanup_msg["MessageBody"]["inventory_bucket"] == aws_env["build_bucket"]
+    assert cleanup_msg["MessageBody"]["dist_bucket"] == aws_env["dist_bucket"]
 
     # 各 Lambda の戻り値が resultPath どおりに state に格納されていること
     assert final_state["download"]["files"], "download step yielded no files"
@@ -315,7 +341,7 @@ def test_asl_halts_on_shacl_violation(
         broken = graph.serialize(format="turtle").encode("utf-8")
         s3.put_object(Bucket=event["build_bucket"], Key=event["ttl_key"], Body=broken)
 
-    handlers = _build_handlers(monkeypatch, validate_hook=_corrupt_ttl)
+    handlers = _build_handlers(monkeypatch, [], validate_hook=_corrupt_ttl)
     sim = ASLSimulator(synthesized_pipeline.definition, execution_name="e2e-run-002")
 
     with pytest.raises(RuntimeError, match=r"ShaclViolation|RDF validation failed"):
@@ -345,7 +371,7 @@ def test_publish_failure_does_not_commit_manifest(
 
     from medical_access_lod.functions.publish import handler as publish
 
-    handlers = _build_handlers(monkeypatch)
+    handlers = _build_handlers(monkeypatch, [])
 
     def _fail_manifest(
         _bucket: str,

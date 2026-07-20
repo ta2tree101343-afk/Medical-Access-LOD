@@ -157,3 +157,109 @@ def get(table: str, run_id: str) -> dict[str, Any] | None:
     )
     item = response.get("Item")
     return item if isinstance(item, dict) else None
+
+
+def list_by_status(table: str, status: GenerationStatus) -> list[dict[str, Any]]:
+    """指定 status の catalog エントリを ConsistentRead で列挙する。
+
+    Query で SYSTEM#GENERATION をキーにするので Scan にはならない。
+    """
+
+    result: list[dict[str, Any]] = []
+    query_kwargs: dict[str, Any] = {
+        "KeyConditionExpression": "PK = :pk",
+        "FilterExpression": "#status = :status",
+        "ExpressionAttributeNames": {"#status": "status"},
+        "ExpressionAttributeValues": {":pk": CATALOG_PK, ":status": status.value},
+        "ConsistentRead": True,
+    }
+    while True:
+        response = _table(table).query(**query_kwargs)
+        result.extend(response.get("Items", []))
+        key = response.get("LastEvaluatedKey")
+        if not key:
+            break
+        query_kwargs["ExclusiveStartKey"] = key
+    return result
+
+
+def mark_deleting(table: str, run_id: str) -> None:
+    """COMMITTED 状態の世代を DELETING へ遷移させる。
+
+    Cleanup Lambda が削除を開始する直前に呼ぶ。既に DELETING/DELETED である
+    場合は冪等成功として扱う (SQS 再配信対応)。COMMITTED でも DELETING/DELETED
+    でもない状態 (STAGED) は Cleanup の対象になってはならないため Conflict。
+    """
+
+    if not run_id:
+        raise ValueError("run_id must not be empty")
+
+    now = int(time.time())
+    try:
+        _table(table).update_item(
+            Key={"PK": CATALOG_PK, "SK": _sk(run_id)},
+            UpdateExpression=(
+                "SET #status = :deleting, "
+                "deleting_at = if_not_exists(deleting_at, :now)"
+            ),
+            ConditionExpression="#status IN (:committed, :deleting, :deleted)",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":deleting": GenerationStatus.DELETING.value,
+                ":committed": GenerationStatus.COMMITTED.value,
+                ":deleted": GenerationStatus.DELETED.value,
+                ":now": now,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+        entry = get(table, run_id)
+        if entry is None:
+            raise GenerationCatalogMissingError(
+                f"generation {run_id!r} does not exist in catalog"
+            ) from exc
+        raise GenerationCatalogConflictError(
+            f"cannot mark generation {run_id!r} as DELETING "
+            f"(current status={entry.get('status')!r})"
+        ) from exc
+
+
+def mark_deleted(table: str, run_id: str) -> None:
+    """DELETING 状態の世代を DELETED (tombstone) へ遷移させる。
+
+    実データの BatchWriteItem 削除が完走したことの記録。DELETED から再度
+    呼ばれた場合は冪等成功。
+    """
+
+    if not run_id:
+        raise ValueError("run_id must not be empty")
+
+    now = int(time.time())
+    try:
+        _table(table).update_item(
+            Key={"PK": CATALOG_PK, "SK": _sk(run_id)},
+            UpdateExpression=(
+                "SET #status = :deleted, "
+                "deleted_at = if_not_exists(deleted_at, :now)"
+            ),
+            ConditionExpression="#status IN (:deleting, :deleted)",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":deleted": GenerationStatus.DELETED.value,
+                ":deleting": GenerationStatus.DELETING.value,
+                ":now": now,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+        entry = get(table, run_id)
+        if entry is None:
+            raise GenerationCatalogMissingError(
+                f"generation {run_id!r} does not exist in catalog"
+            ) from exc
+        raise GenerationCatalogConflictError(
+            f"cannot mark generation {run_id!r} as DELETED "
+            f"(current status={entry.get('status')!r})"
+        ) from exc

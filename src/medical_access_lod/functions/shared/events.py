@@ -62,3 +62,20 @@ class BuildReadModelEvent(BaseEvent):
     # generation catalog に STAGED で登録する際に必要。Cleanup 時の保持ポリシー
     # (直近 N 世代 + 最低保持期間) の判定にも使う。
     snapshot_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class CleanupEvent(BaseModel):
+    """Cleanup Lambda が SQS メッセージ (もしくは直接 invoke) から受け取る入力。
+
+    Publish 完了後に SFN が SendMessage したメッセージ、または EventBridge の
+    定期補助スケジュールから届く。trigger_run_id は "どの Publish 完了を
+    受けた発火か" のログ用フィールドで、Cleanup 側は catalog を毎回スキャンして
+    判断するため実処理には影響しない。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    trigger_run_id: str = Field(min_length=1, max_length=128)
+    read_model_table: str = Field(min_length=1)
+    inventory_bucket: str = Field(min_length=3)
+    dist_bucket: str = Field(min_length=3)

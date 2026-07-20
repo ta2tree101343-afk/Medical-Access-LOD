@@ -192,32 +192,91 @@ def _resolve_import_value(
     raise TypeError(f"Unsupported exported value for {export_name!r}: {value!r}")
 
 
-def _lambda_function_key(template: dict[str, Any], expression: dict[str, Any]) -> str:
-    get_att = expression.get("Fn::GetAtt")
-    if not (
-        isinstance(get_att, list)
-        and len(get_att) == 2
-        and isinstance(get_att[0], str)
-        and get_att[1] == "Arn"
-    ):
-        raise TypeError(f"Unsupported Task Resource expression: {expression!r}")
-    resource = template.get("Resources", {}).get(get_att[0])
-    if resource is None or resource.get("Type") != "AWS::Lambda::Function":
-        raise TypeError(f"Task Resource is not a Lambda function: {expression!r}")
-    function_key = (
-        resource.get("Properties", {})
-        .get("Environment", {})
-        .get("Variables", {})
-        .get("FUNCTION_KEY")
-    )
-    if not isinstance(function_key, str) or not function_key:
-        raise ValueError(f"Lambda {get_att[0]} has no FUNCTION_KEY")
-    return function_key
+def _resolve_task_token(template: dict[str, Any], expression: dict[str, Any]) -> str:
+    """Task Resource / Parameters 内の CFN 式を、シミュレータが扱える値に解決する。
+
+    - `Fn::GetAtt: [<LambdaLogicalId>, "Arn"]` → Lambda の FUNCTION_KEY
+    - `Fn::GetAtt: [<QueueLogicalId>, "QueueName"]` → 物理キュー名
+    - `Ref: <QueueLogicalId>` → 物理キュー名 (SQS の QueueUrl 相当)
+    - `Ref: "AWS::Partition"` → "aws"
+    - `Ref: "AWS::Region"` / `"AWS::AccountId"` などの AWS 疑似パラメータ
+    """
+    if isinstance(expression, dict):
+        get_att = expression.get("Fn::GetAtt")
+        if (
+            isinstance(get_att, list)
+            and len(get_att) == 2
+            and isinstance(get_att[0], str)
+        ):
+            resource = template.get("Resources", {}).get(get_att[0])
+            if resource is None:
+                raise LookupError(f"CFN resource {get_att[0]!r} not found")
+            attr = get_att[1]
+            rtype = resource.get("Type")
+            if rtype == "AWS::Lambda::Function" and attr == "Arn":
+                function_key = (
+                    resource.get("Properties", {})
+                    .get("Environment", {})
+                    .get("Variables", {})
+                    .get("FUNCTION_KEY")
+                )
+                if not isinstance(function_key, str) or not function_key:
+                    raise ValueError(f"Lambda {get_att[0]} has no FUNCTION_KEY")
+                return function_key
+            if rtype == "AWS::SQS::Queue" and attr == "QueueName":
+                name = resource.get("Properties", {}).get("QueueName")
+                if isinstance(name, str):
+                    return name
+                raise TypeError(f"SQS queue {get_att[0]} has no QueueName")
+            raise TypeError(
+                f"Unsupported Fn::GetAtt attribute for {rtype}: {attr!r}"
+            )
+        ref = expression.get("Ref")
+        if isinstance(ref, str):
+            if ref == "AWS::Partition":
+                return "aws"
+            if ref == "AWS::Region":
+                return "ap-northeast-1"
+            if ref == "AWS::AccountId":
+                return "111111111111"
+            resource = template.get("Resources", {}).get(ref)
+            if resource is not None:
+                rtype = resource.get("Type")
+                if rtype == "AWS::SQS::Queue":
+                    # Ref of Queue returns QueueUrl. Simulator は URL 全体は不要で、
+                    # queue 名だけあれば dispatch できるので QueueName を返す。
+                    name = resource.get("Properties", {}).get("QueueName")
+                    if isinstance(name, str):
+                        return f"sqs-queue://{name}"
+                if rtype == "AWS::S3::Bucket":
+                    name = resource.get("Properties", {}).get("BucketName")
+                    if isinstance(name, str):
+                        return name
+                if rtype == "AWS::DynamoDB::Table":
+                    name = resource.get("Properties", {}).get("TableName")
+                    if isinstance(name, str):
+                        return name
+            raise LookupError(f"Unsupported Ref target: {ref!r}")
+    raise TypeError(f"Unsupported CFN expression: {expression!r}")
 
 
 def _replace_tokens(value: Any, replacements: dict[str, str]) -> Any:
+    """置換対象 (token → resolved value) を再帰的に適用する。
+
+    Fn::Join の内側では ARN 断片が組み立てられるため、単純な dict lookup では
+    足らず、文字列内の token 部分置換も必要 (例:
+    "arn:__CFN_TOKEN_11__:states:::sqs:sendMessage")。
+    """
     if isinstance(value, str):
-        return replacements.get(value, value)
+        # 完全一致優先 (bucket 名などの単独トークン)
+        if value in replacements:
+            return replacements[value]
+        # 部分置換 (ARN 断片など)
+        replaced = value
+        for token, resolved in replacements.items():
+            if token in replaced:
+                replaced = replaced.replace(token, resolved)
+        return replaced
     if isinstance(value, list):
         return [_replace_tokens(item, replacements) for item in value]
     if isinstance(value, dict):
@@ -237,10 +296,9 @@ def _resolve_cfn_tokens(
         import_name = expression.get("Fn::ImportValue")
         if isinstance(import_name, str):
             replacements[token] = _resolve_import_value(import_name, templates)
-        elif "Fn::GetAtt" in expression:
-            replacements[token] = _lambda_function_key(pipeline_template, expression)
         else:
-            raise TypeError(f"Unsupported CloudFormation expression: {expression!r}")
+            # Fn::GetAtt / Ref (Lambda Arn / SQS QueueName / AWS pseudo params 等)
+            replacements[token] = _resolve_task_token(pipeline_template, expression)
 
     resolved = _replace_tokens(deepcopy(extracted.definition), replacements)
     if not isinstance(resolved, dict):
