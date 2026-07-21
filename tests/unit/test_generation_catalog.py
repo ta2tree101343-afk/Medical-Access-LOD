@@ -165,6 +165,34 @@ def test_mark_deleted_rejects_committed_without_intermediate_deleting(catalog_en
         generation_catalog.mark_deleted(catalog_env, "run-A")
 
 
+def test_update_deletion_cursor_persists_progress_only_when_deleting(catalog_env: str) -> None:
+    _register(catalog_env, "run-A")
+    generation_catalog.mark_committed(catalog_env, "run-A")
+    generation_catalog.mark_deleting(catalog_env, "run-A")
+
+    generation_catalog.update_deletion_cursor(catalog_env, "run-A", 3)
+    entry = generation_catalog.get(catalog_env, "run-A")
+    assert entry is not None
+    assert int(entry["deletion_cursor"]) == 3
+
+    generation_catalog.update_deletion_cursor(catalog_env, "run-A", 5)
+    entry = generation_catalog.get(catalog_env, "run-A")
+    assert entry is not None
+    assert int(entry["deletion_cursor"]) == 5
+
+
+def test_update_deletion_cursor_rejects_non_deleting_state(catalog_env: str) -> None:
+    _register(catalog_env, "run-A")
+    generation_catalog.mark_committed(catalog_env, "run-A")
+    with pytest.raises(generation_catalog.GenerationCatalogConflictError):
+        generation_catalog.update_deletion_cursor(catalog_env, "run-A", 1)
+
+
+def test_update_deletion_cursor_rejects_negative(catalog_env: str) -> None:
+    with pytest.raises(ValueError, match="cursor"):
+        generation_catalog.update_deletion_cursor(catalog_env, "run-A", -1)
+
+
 def test_list_by_status_returns_only_matching_entries(catalog_env: str) -> None:
     from medical_access_lod.functions.shared.generation_catalog import GenerationStatus
     _register(catalog_env, "run-staged")

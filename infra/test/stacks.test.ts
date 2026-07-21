@@ -392,23 +392,50 @@ describe('PipelineStack', () => {
     const statements = Object.values(policies).flatMap(
       (policy: any) => policy.Properties.PolicyDocument.Statement,
     );
-    // Cleanup 用の DynamoDB Statement (LeadingKeys=SYSTEM#GENERATION+GENERATION) を探す
-    const cleanupDdbStatement = statements.find((statement: any) => {
+
+    // 実 PK は 2 種類 (catalog: SYSTEM#GENERATION 完全一致 / データ: GENERATION#*
+    // プレフィックス) で条件式が違うため、Cleanup の DynamoDB 権限は
+    // Statement を 2 本に分けている。両方が存在し、SYSTEM#PIPELINE が
+    // どこにも入っていないことを検証する。
+    const catalogStatement = statements.find((statement: any) => {
       const leadingKeys = statement.Condition?.['ForAllValues:StringEquals']?.[
         'dynamodb:LeadingKeys'
       ];
-      if (!Array.isArray(leadingKeys)) return false;
-      return (
-        leadingKeys.includes('SYSTEM#GENERATION')
-        && leadingKeys.includes('GENERATION')
-      );
+      return Array.isArray(leadingKeys)
+        && leadingKeys.length === 1
+        && leadingKeys[0] === 'SYSTEM#GENERATION'
+        // BatchWriteItem を持たない = catalog 側 Statement
+        && !(Array.isArray(statement.Action) ? statement.Action : [statement.Action])
+          .includes('dynamodb:BatchWriteItem');
     });
-    expect(cleanupDdbStatement).toBeDefined();
-    const leadingKeys = cleanupDdbStatement.Condition['ForAllValues:StringEquals'][
-      'dynamodb:LeadingKeys'
-    ];
-    // 決して SYSTEM#PIPELINE は含まれてはならない (Publish の lock を守るため)
-    expect(leadingKeys).not.toContain('SYSTEM#PIPELINE');
+    expect(catalogStatement).toBeDefined();
+    const catalogActions = Array.isArray(catalogStatement.Action)
+      ? catalogStatement.Action
+      : [catalogStatement.Action];
+    expect(catalogActions).toEqual(
+      expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Query']),
+    );
+
+    const dataStatement = statements.find((statement: any) => {
+      const leadingKeys = statement.Condition?.['ForAllValues:StringLike']?.[
+        'dynamodb:LeadingKeys'
+      ];
+      return Array.isArray(leadingKeys) && leadingKeys.includes('GENERATION#*');
+    });
+    expect(dataStatement).toBeDefined();
+    const dataActions = Array.isArray(dataStatement.Action)
+      ? dataStatement.Action
+      : [dataStatement.Action];
+    expect(dataActions).toContain('dynamodb:BatchWriteItem');
+    // データ側 Statement には catalog 遷移用 UpdateItem を混ぜない
+    expect(dataActions).not.toContain('dynamodb:UpdateItem');
+
+    // どの Statement にも SYSTEM#PIPELINE は含めない (Publish lock を守るため)
+    for (const stmt of [catalogStatement, dataStatement]) {
+      const eq = stmt.Condition?.['ForAllValues:StringEquals']?.['dynamodb:LeadingKeys'] ?? [];
+      const like = stmt.Condition?.['ForAllValues:StringLike']?.['dynamodb:LeadingKeys'] ?? [];
+      expect([...eq, ...like]).not.toContain('SYSTEM#PIPELINE');
+    }
   });
 
   test('Cleanup can read manifest and inventory only', () => {

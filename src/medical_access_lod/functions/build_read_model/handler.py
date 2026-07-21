@@ -133,6 +133,7 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
             request.build_bucket,
             inventory_prefix,
             ((item["PK"], item["SK"]) for item in items),
+            run_id=request.run_id,
         )
     except Exception:
         try:

@@ -199,21 +199,38 @@ export class PipelineStack extends cdk.Stack {
       },
     });
 
-    // Cleanup IAM: SYSTEM#PIPELINE は決して触らせない。
-    // - catalog (SYSTEM#GENERATION) の UpdateItem/GetItem
-    // - 実データ (GENERATION#*) の BatchWriteItem/DeleteItem/Query
+    // Cleanup IAM: SYSTEM#PIPELINE (Publish lock) には決して触らせない。
+    //
+    // 実 PK の形は 2 種類あり、条件式が異なる:
+    //   - catalog: PK = "SYSTEM#GENERATION" (単一値の完全一致)
+    //   - 実データ: PK = "GENERATION#<run_id>#FACILITY#<fid>" (プレフィックス一致)
+    // StringEquals では後者にマッチしないため BatchWriteItem が AccessDenied に
+    // なる。Statement を分けて catalog は StringEquals、データは StringLike で許可。
+    //
+    // Statement A: catalog エントリ (SYSTEM#GENERATION) — get/list/status 遷移
     cleanupFn.addToRolePolicy(new iam.PolicyStatement({
       actions: [
         'dynamodb:GetItem',
         'dynamodb:UpdateItem',
         'dynamodb:Query',
-        'dynamodb:BatchWriteItem',
-        'dynamodb:DeleteItem',
       ],
       resources: [props.readModelTable.tableArn],
       conditions: {
         'ForAllValues:StringEquals': {
-          'dynamodb:LeadingKeys': ['SYSTEM#GENERATION', 'GENERATION'],
+          'dynamodb:LeadingKeys': ['SYSTEM#GENERATION'],
+        },
+      },
+    }));
+    // Statement B: 実データ (GENERATION#*) — BatchWriteItem による削除のみ
+    // DeleteItem は現状未使用 (BatchWriteItem に集約) のため付与しない。
+    cleanupFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'dynamodb:BatchWriteItem',
+      ],
+      resources: [props.readModelTable.tableArn],
+      conditions: {
+        'ForAllValues:StringLike': {
+          'dynamodb:LeadingKeys': ['GENERATION#*'],
         },
       },
     }));
