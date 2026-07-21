@@ -64,7 +64,7 @@ jobs:
         run: |
           REPO="$REGISTRY/medical-access-lod-$ENV_NAME-pipeline"
           docker build --platform linux/arm64 -t "$REPO:latest" .
-          for TAG in download normalize buildrdf validate publish buildreadmodel api; do
+          for TAG in download normalize buildrdf validate publish buildreadmodel cleanup api; do
             docker tag "$REPO:latest" "$REPO:$TAG"
             docker push "$REPO:$TAG"
           done

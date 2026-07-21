@@ -547,6 +547,13 @@ def test_publish_without_lock_is_idempotent_only_for_committed_run(
 
     monkeypatch.setattr(publish_handler.pipeline_lock, "renew", missing_lock)
     monkeypatch.setattr(publish_handler.pipeline_lock, "release", lambda _table, _owner: True)
+    # idempotent 復帰でも catalog は mark_committed される (test_publish_idempotent_retry_
+    # still_marks_catalog_committed が意味を検証)。ここでは実 DDB を触らないよう mock。
+    monkeypatch.setattr(
+        publish_handler.generation_catalog,
+        "mark_committed",
+        lambda _table, _run_id: 1,
+    )
 
     def unexpected_copy(*_args: str) -> None:
         raise AssertionError("completed retry must not copy artifacts")
@@ -561,6 +568,61 @@ def test_publish_without_lock_is_idempotent_only_for_committed_run(
         "releases/2025-12-01/completed-run/medical-access-lod.jsonld",
         "latest/manifest.json",
     ]
+
+
+def test_publish_idempotent_retry_still_marks_catalog_committed(
+    aws_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """manifest CAS 成功後に catalog 更新だけ落ちた場合、次回の idempotent 復帰でも
+    mark_committed を必ず呼ぶ。呼ばないと公開済み世代が catalog 上は STAGED のまま
+    残り、Cleanup Lambda がこの世代を GC 対象外として永久に残す。"""
+
+    from medical_access_lod.functions.publish import handler as publish_handler
+
+    s3 = boto3.client("s3", region_name="ap-northeast-1")
+    completed_manifest = {
+        "schema_version": 1,
+        "run_id": "resumed-run",
+        "snapshot_date": "2025-12-01",
+        "artifacts": {
+            "turtle": {
+                "key": "releases/2025-12-01/resumed-run/medical-access-lod.ttl",
+                "size": 3,
+                "etag": "ttl-etag",
+                "content_type": "text/turtle; charset=utf-8",
+            },
+            "jsonld": {
+                "key": "releases/2025-12-01/resumed-run/medical-access-lod.jsonld",
+                "size": 4,
+                "etag": "jsonld-etag",
+                "content_type": "application/ld+json",
+            },
+        },
+    }
+    s3.put_object(
+        Bucket=DIST_BUCKET,
+        Key="latest/manifest.json",
+        Body=json.dumps(completed_manifest).encode(),
+    )
+
+    def missing_lock(_table: str, _owner: str) -> int:
+        raise publish_handler.pipeline_lock.PipelineLockMissingError("lock is missing")
+
+    monkeypatch.setattr(publish_handler.pipeline_lock, "renew", missing_lock)
+    monkeypatch.setattr(publish_handler.pipeline_lock, "release", lambda _t, _o: True)
+
+    mark_committed_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        publish_handler.generation_catalog,
+        "mark_committed",
+        lambda table, run_id: mark_committed_calls.append((table, run_id)) or 1,
+    )
+
+    publish_handler.lambda_handler(
+        _publish_event("resumed-run"),
+        _FakeLambdaContext(),  # type: ignore[arg-type]
+    )
+    assert mark_committed_calls == [("read-model", "resumed-run")]
 
 
 def test_build_read_model_failure_is_not_masked_when_lock_release_fails(

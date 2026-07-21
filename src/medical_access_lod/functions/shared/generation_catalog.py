@@ -225,6 +225,44 @@ def mark_deleting(table: str, run_id: str) -> None:
         ) from exc
 
 
+def update_deletion_cursor(table: str, run_id: str, cursor: int) -> None:
+    """DELETING 状態の世代の deletion_cursor (次に処理する chunk index) を保存する。
+
+    Cleanup Lambda が Lambda timeout に近づいた際に途中で抜け、次の SQS 配信で
+    途中から再開するために使う。DELETING でない世代は書き換えない (STAGED /
+    COMMITTED / DELETED を誤って進捗更新しないため)。
+    """
+
+    if not run_id:
+        raise ValueError("run_id must not be empty")
+    if cursor < 0:
+        raise ValueError("cursor must be non-negative")
+
+    try:
+        _table(table).update_item(
+            Key={"PK": CATALOG_PK, "SK": _sk(run_id)},
+            UpdateExpression="SET deletion_cursor = :cursor",
+            ConditionExpression="#status = :deleting",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":cursor": cursor,
+                ":deleting": GenerationStatus.DELETING.value,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+        entry = get(table, run_id)
+        if entry is None:
+            raise GenerationCatalogMissingError(
+                f"generation {run_id!r} does not exist in catalog"
+            ) from exc
+        raise GenerationCatalogConflictError(
+            f"cannot update deletion_cursor for generation {run_id!r} "
+            f"(current status={entry.get('status')!r})"
+        ) from exc
+
+
 def mark_deleted(table: str, run_id: str) -> None:
     """DELETING 状態の世代を DELETED (tombstone) へ遷移させる。
 

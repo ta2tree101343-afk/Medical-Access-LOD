@@ -226,6 +226,30 @@ def _response(request: PublishEvent, manifest: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _mark_committed_idempotently(request: PublishEvent) -> None:
+    """catalog を COMMITTED に遷移させる。既に COMMITTED なら冪等成功。
+
+    manifest CAS は成功したのに catalog 更新が transient エラーで失敗した
+    ケースに備え、idempotent な再試行経路 (`_renew_or_get_completed_manifest`
+    が manifest を返した場合) からも呼ぶ。呼ばないと、公開済み世代が
+    catalog 上は STAGED のまま Cleanup 対象外になり永久に残る。
+    """
+
+    try:
+        generation_catalog.mark_committed(
+            request.read_model_table,
+            request.run_id,
+        )
+    except generation_catalog.GenerationCatalogMissingError:
+        # 移行期の manifest (旧 pipeline が catalog を書かずに publish した
+        # 場合など) を retry で通したケース。commit 自体は成功しているので
+        # ここで失敗させない。
+        logger.warning(
+            "generation catalog entry missing during mark_committed; "
+            "publish succeeded but Cleanup will skip this generation"
+        )
+
+
 def _release_lock(request: PublishEvent) -> None:
     """所有中のロックだけを解放し、公開結果や元の例外を上書きしない。"""
     try:
@@ -273,6 +297,7 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         completed_manifest = _renew_or_get_completed_manifest(request, artifacts)
         if completed_manifest is not None:
             logger.info("publish already completed; returning idempotently")
+            _mark_committed_idempotently(request)
             return _response(request, completed_manifest)
         _, expected_manifest_etag = _read_manifest_state(request.dist_bucket)
 
@@ -303,6 +328,7 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         completed_manifest = _renew_or_get_completed_manifest(request, artifacts)
         if completed_manifest is not None:
             logger.info("publish completed by another retry; skipping manifest update")
+            _mark_committed_idempotently(request)
             return _response(request, completed_manifest)
         committed_manifest, committed = _commit_manifest(
             request.dist_bucket,
@@ -324,19 +350,7 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         # Manifest commit が成功した後にのみ generation catalog を COMMITTED へ
         # 遷移させる。以降 Cleanup Lambda はこの世代を "公開済み" として扱える。
         # STAGED から呼ばれても COMMITTED から呼ばれても冪等成功 (再試行対応)。
-        try:
-            generation_catalog.mark_committed(
-                request.read_model_table,
-                request.run_id,
-            )
-        except generation_catalog.GenerationCatalogMissingError:
-            # 移行期の manifest (旧 pipeline が catalog を書かずに publish した
-            # 場合など) を retry で通したケース。commit 自体は成功しているので
-            # ここで失敗させない。
-            logger.warning(
-                "generation catalog entry missing during mark_committed; "
-                "publish succeeded but Cleanup will skip this generation"
-            )
+        _mark_committed_idempotently(request)
         return _response(request, committed_manifest)
     finally:
         _release_lock(request)

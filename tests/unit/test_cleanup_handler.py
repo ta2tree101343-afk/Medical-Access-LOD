@@ -73,7 +73,7 @@ def _seed_generation(run_id: str, keys: list[tuple[str, str]]) -> None:
         for pk, sk in keys:
             batch.put_item(Item={"PK": pk, "SK": sk, "generation": run_id})
     prefix = f"generations/{run_id}/inventory/"
-    generation_inventory.write_inventory(BUILD_BUCKET, prefix, iter(keys))
+    generation_inventory.write_inventory(BUILD_BUCKET, prefix, iter(keys), run_id=run_id)
     generation_catalog.register_staged(
         TABLE,
         run_id,
@@ -193,3 +193,111 @@ def test_cleanup_resumes_interrupted_deleting_generation(cleanup_env: None) -> N
     assert "crashed-run" in result["deleted_run_ids"]  # type: ignore[operator]
     entry = generation_catalog.get(TABLE, "crashed-run")
     assert entry is not None and entry["status"] == "DELETED"
+
+
+class _TimedContext(_FakeLambdaContext):
+    """get_remaining_time_in_millis を返すコンテキスト。呼ばれるたびに値が減る。"""
+
+    def __init__(self, initial_ms: int, decrement_per_call_ms: int = 0) -> None:
+        self._remaining = initial_ms
+        self._decrement = decrement_per_call_ms
+
+    def get_remaining_time_in_millis(self) -> int:
+        value = self._remaining
+        self._remaining -= self._decrement
+        return value
+
+
+def test_cleanup_exits_early_when_lambda_time_budget_runs_out(
+    cleanup_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lambda 残時間が閾値を下回ったら chunk 途中でも早期終了し、
+    cursor を DynamoDB に残す。次の SQS 配信で続きから再開できる。"""
+    from medical_access_lod.functions.cleanup import handler as cleanup_handler
+
+    # 6 chunk 分 (chunk_size=1) の inventory を作る。1 chunk 消化ごとに残時間確認。
+    keys = _generation_keys("big-run", 6)
+    ddb_table = boto3.resource("dynamodb", region_name=REGION).Table(TABLE)
+    with ddb_table.batch_writer(overwrite_by_pkeys=["PK", "SK"]) as batch:
+        for pk, sk in keys:
+            batch.put_item(Item={"PK": pk, "SK": sk, "generation": "big-run"})
+    from medical_access_lod.functions.shared import generation_inventory
+    prefix = "generations/big-run/inventory/"
+    generation_inventory.write_inventory(
+        BUILD_BUCKET, prefix, iter(keys), run_id="big-run", chunk_size=1
+    )
+    generation_catalog.register_staged(
+        TABLE, "big-run", snapshot_date="2025-12-01",
+        inventory_prefix=prefix, item_count=6,
+    )
+    generation_catalog.mark_committed(TABLE, "big-run")
+
+    _seed_generation("active-run", _generation_keys("active-run", 1))
+    _put_manifest("active-run")
+    monkeypatch.setenv("RETENTION_KEEP_LAST_N", "1")
+    monkeypatch.setenv("RETENTION_MIN_AGE_DAYS", "0")
+
+    # 3 chunk 分だけ処理できる時間を渡す (初回 90秒 → 呼ぶたびに 30秒減少)。
+    # 閾値 30_000ms を切ったら早期終了する。
+    ctx = _TimedContext(initial_ms=90_000, decrement_per_call_ms=30_000)
+    result = cleanup_handler.lambda_handler(_basic_event("active-run"), ctx)  # type: ignore[arg-type]
+
+    # 完了せず incomplete で返り、catalog は DELETING のまま cursor が進んでいる
+    assert "big-run" not in result["deleted_run_ids"]  # type: ignore[operator]
+    assert "big-run" in result["incomplete_run_ids"]  # type: ignore[operator]
+    entry = generation_catalog.get(TABLE, "big-run")
+    assert entry is not None
+    assert entry["status"] == "DELETING"
+    cursor = int(entry.get("deletion_cursor", 0))
+    assert 0 < cursor < 6
+
+    # 続き: 十分な残時間で再走すると cursor から再開して完了する
+    ctx2 = _TimedContext(initial_ms=600_000)
+    result2 = cleanup_handler.lambda_handler(_basic_event("active-run"), ctx2)  # type: ignore[arg-type]
+    assert "big-run" in result2["deleted_run_ids"]  # type: ignore[operator]
+    entry2 = generation_catalog.get(TABLE, "big-run")
+    assert entry2 is not None and entry2["status"] == "DELETED"
+
+    # 実データが全て消えていること
+    scan = ddb_table.scan(
+        FilterExpression="begins_with(PK, :p)",
+        ExpressionAttributeValues={":p": "GENERATION#big-run#"},
+    )
+    assert scan["Count"] == 0
+
+
+def test_cleanup_refuses_when_inventory_count_disagrees_with_catalog(
+    cleanup_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """catalog は item_count>0 だが inventory の item_count が食い違う場合、
+    削除に進まず catalog も DELETED にしない (残骸を隠さない)。"""
+    from medical_access_lod.functions.shared import generation_inventory
+
+    _seed_generation("corrupt-run", _generation_keys("corrupt-run", 3))
+    _put_manifest("active-run")
+    _seed_generation("active-run", _generation_keys("active-run", 1))
+
+    # inventory を上書きして item_count を故意に 0 に。実データ (3件) は残す。
+    prefix = "generations/corrupt-run/inventory/"
+    generation_inventory.write_inventory(
+        BUILD_BUCKET, prefix, iter([]), run_id="corrupt-run"
+    )
+
+    monkeypatch.setenv("RETENTION_KEEP_LAST_N", "1")
+    monkeypatch.setenv("RETENTION_MIN_AGE_DAYS", "0")
+
+    with pytest.raises(generation_inventory.InventoryValidationError):
+        _invoke(_basic_event("active-run"))
+
+    # catalog は DELETING のまま (DELETED tombstone は付かない)
+    entry = generation_catalog.get(TABLE, "corrupt-run")
+    assert entry is not None
+    assert entry["status"] == "DELETING"
+
+    # 実データも残っている
+    ddb_table = boto3.resource("dynamodb", region_name=REGION).Table(TABLE)
+    scan = ddb_table.scan(
+        FilterExpression="begins_with(PK, :p)",
+        ExpressionAttributeValues={":p": "GENERATION#corrupt-run#"},
+    )
+    assert scan["Count"] == 3
