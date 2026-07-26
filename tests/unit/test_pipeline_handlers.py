@@ -97,17 +97,17 @@ def test_build_rdf_handler_uploads_ttl_and_jsonld(aws_env: None) -> None:
                 },
             }
         ],
-        "services": [{"facility_id": "F1", "specialty_code": "01"}],
+        "services": [{"facility_id": "F1", "specialty_code": "1001"}],
         "schedules": [
             {
                 "facility_id": "F1",
-                "specialty_code": "01",
+                "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
             }
         ],
-        "specialty_labels": {"01": "内科"},
+        "specialty_labels": {"1001": "内科"},
     }
     s3 = boto3.client("s3", region_name="ap-northeast-1")
     s3.put_object(
@@ -149,10 +149,10 @@ def _valid_ttl() -> bytes:
         '  schema:addressLocality "千葉市中央区"@ja ;\n'
         '  schema:streetAddress "1-1-1"@ja .\n'
         '<resource/service/F1/01> a ex:ClinicalService ;\n'
-        '  ex:medicalSpecialty <concept/specialty/01> ;\n'
+        '  ex:medicalSpecialty <concept/specialty/1001> ;\n'
         '  ex:hasSchedule <resource/schedule/F1/01/MON/1> .\n'
-        '<concept/specialty/01> a skos:Concept ;\n'
-        '  skos:notation "01" .\n'
+        '<concept/specialty/1001> a skos:Concept ;\n'
+        '  skos:notation "1001" .\n'
         '<resource/schedule/F1/01/MON/1> a schema:OpeningHoursSpecification ;\n'
         '  schema:dayOfWeek schema:Monday ;\n'
         '  schema:opens "09:00:00"^^xsd:time ;\n'
@@ -691,17 +691,17 @@ def test_build_read_model_handler_writes_dynamodb_items(aws_env: None) -> None:
                 },
             }
         ],
-        "services": [{"facility_id": "F1", "specialty_code": "01"}],
+        "services": [{"facility_id": "F1", "specialty_code": "1001"}],
         "schedules": [
             {
                 "facility_id": "F1",
-                "specialty_code": "01",
+                "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
             }
         ],
-        "specialty_labels": {"01": "内科"},
+        "specialty_labels": {"1001": "内科"},
     }
     s3 = boto3.client("s3", region_name="ap-northeast-1")
     s3.put_object(
@@ -754,8 +754,8 @@ def test_build_read_model_handler_writes_dynamodb_items(aws_env: None) -> None:
     ]
     assert {(item["PK"], item["SK"]) for item in data_items} == {
         ("GENERATION#test-006#FACILITY#F1", "METADATA"),
-        ("GENERATION#test-006#FACILITY#F1", "SERVICE#01"),
-        ("GENERATION#test-006#FACILITY#F1", "SCHEDULE#01#Monday#09:00:00"),
+        ("GENERATION#test-006#FACILITY#F1", "SERVICE#1001"),
+        ("GENERATION#test-006#FACILITY#F1", "SCHEDULE#1001#Monday#09:00:00"),
     }
 
 
@@ -811,9 +811,9 @@ def test_build_read_model_keeps_previous_generation_until_manifest_switch(
                 },
             }
         ],
-        "services": [{"facility_id": "F1", "specialty_code": "01"}],
+        "services": [{"facility_id": "F1", "specialty_code": "1001"}],
         "schedules": [],
-        "specialty_labels": {"01": "内科"},
+        "specialty_labels": {"1001": "内科"},
     }
     s3 = boto3.client("s3", region_name="ap-northeast-1")
     s3.put_object(
@@ -849,7 +849,7 @@ def test_build_read_model_keeps_previous_generation_until_manifest_switch(
         ("GENERATION#old-run#FACILITY#DELETED", "METADATA"),
         ("GENERATION#old-run#FACILITY#F1", "SERVICE#99"),
         ("GENERATION#new-run-001#FACILITY#F1", "METADATA"),
-        ("GENERATION#new-run-001#FACILITY#F1", "SERVICE#01"),
+        ("GENERATION#new-run-001#FACILITY#F1", "SERVICE#1001"),
     }
 
 

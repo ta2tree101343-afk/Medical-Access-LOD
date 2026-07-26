@@ -15,7 +15,7 @@ WHERE {
 
     ?address schema:addressLocality "千葉市中央区"@ja .
 
-    ?service ex:medicalSpecialty <concept/specialty/03> ;
+    ?service ex:medicalSpecialty <concept/specialty/6001> ;
              ex:hasSchedule ?schedule .
 
     ?schedule schema:dayOfWeek ?dayOfWeek ;

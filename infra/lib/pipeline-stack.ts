@@ -22,6 +22,13 @@ export interface PipelineStackProps extends cdk.StackProps {
   distBucket: s3.Bucket;
   readModelTable: dynamodb.Table;
   ecrRepository: ecr.Repository;
+  /**
+   * ECR image tag (通常は commit SHA)。deploy.yml から `-c imageTag=<sha>` で渡す。
+   * 固定タグを上書きする従来運用では ECR 側の内容が変わっても CloudFormation が
+   * 差分を検知せず Lambda が更新されない問題があったため、デプロイのたびに
+   * 異なるタグを CDK 引数に渡すことで確実に Lambda を更新する。
+   */
+  imageTag: string;
 }
 
 const SNAPSHOT_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -78,6 +85,9 @@ const FUNCTIONS: FnSpec[] = [
 export class PipelineStack extends cdk.Stack {
   public readonly stateMachine: sfn.StateMachine;
   public readonly pipelineFunctions: Record<string, lambda.Function>;
+  public readonly cleanupFunction: lambda.Function;
+  public readonly cleanupDlq: sqs.Queue;
+  public readonly cleanupQueue: sqs.Queue;
 
   constructor(scope: Construct, id: string, props: PipelineStackProps) {
     super(scope, id, props);
@@ -100,7 +110,7 @@ export class PipelineStack extends cdk.Stack {
       const fn = new lambda.DockerImageFunction(this, `${spec.key}Function`, {
         functionName: `medical-access-lod-${props.envName}-${spec.key.toLowerCase()}`,
         code: lambda.DockerImageCode.fromEcr(props.ecrRepository, {
-          tagOrDigest: spec.key.toLowerCase(),
+          tagOrDigest: props.imageTag,
           cmd: [spec.handler],
         }),
         architecture: lambda.Architecture.ARM_64,
@@ -179,7 +189,7 @@ export class PipelineStack extends cdk.Stack {
     const cleanupFn = new lambda.DockerImageFunction(this, 'CleanupFunction', {
       functionName: `medical-access-lod-${props.envName}-cleanup`,
       code: lambda.DockerImageCode.fromEcr(props.ecrRepository, {
-        tagOrDigest: 'cleanup',
+        tagOrDigest: props.imageTag,
         cmd: ['medical_access_lod.functions.cleanup.handler.lambda_handler'],
       }),
       architecture: lambda.Architecture.ARM_64,
@@ -244,6 +254,11 @@ export class PipelineStack extends cdk.Stack {
       batchSize: 1,  // 各メッセージは全世代の GC を試みるので並列不要
       reportBatchItemFailures: true,
     }));
+
+    // MonitoringStack から参照するため公開する。
+    this.cleanupFunction = cleanupFn;
+    this.cleanupDlq = cleanupDlq;
+    this.cleanupQueue = cleanupQueue;
 
     // Step Functions
     //

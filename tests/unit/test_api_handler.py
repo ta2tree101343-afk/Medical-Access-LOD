@@ -9,6 +9,8 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from medical_access_lod.functions.api.handler import _normalize_time
+
 TABLE_NAME = "medical-access-lod-test-read-model"
 DIST_BUCKET = "medical-access-lod-test-dist"
 
@@ -72,18 +74,18 @@ def _create_table_and_seed() -> None:
         batch.put_item(
             Item={
                 "PK": "FACILITY#F1",
-                "SK": "SERVICE#01",
-                "specialty_code": "01",
+                "SK": "SERVICE#1001",
+                "specialty_code": "1001",
                 "specialty_label": "内科",
                 "GSI1PK": "CITY#千葉市中央区",
-                "GSI1SK": "SPECIALTY#01#FACILITY#F1",
+                "GSI1SK": "SPECIALTY#1001#FACILITY#F1",
             }
         )
         batch.put_item(
             Item={
                 "PK": "FACILITY#F1",
-                "SK": "SCHEDULE#01#Monday#09:00:00",
-                "specialty_code": "01",
+                "SK": "SCHEDULE#1001#Monday#09:00:00",
+                "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
@@ -105,8 +107,8 @@ def _create_table_and_seed() -> None:
         batch.put_item(
             Item={
                 "PK": "FACILITY#F2",
-                "SK": "SERVICE#01",
-                "specialty_code": "01",
+                "SK": "SERVICE#1001",
+                "specialty_code": "1001",
                 "specialty_label": "内科",
                 "GSI1PK": "CITY#千葉市花見川区",
                 "GSI1SK": "SPECIALTY#1001#FACILITY#F2",
@@ -136,20 +138,20 @@ def _seed_generation(run_id: str, *, name: str, street_address: str) -> None:
         batch.put_item(
             Item={
                 "PK": pk,
-                "SK": "SERVICE#01",
+                "SK": "SERVICE#1001",
                 "generation": run_id,
-                "specialty_code": "01",
+                "specialty_code": "1001",
                 "specialty_label": "内科",
                 "GSI1PK": city_pk,
-                "GSI1SK": "SPECIALTY#01#FACILITY#F1",
+                "GSI1SK": "SPECIALTY#1001#FACILITY#F1",
             }
         )
         batch.put_item(
             Item={
                 "PK": pk,
-                "SK": "SCHEDULE#01#Monday#09:00:00",
+                "SK": "SCHEDULE#1001#Monday#09:00:00",
                 "generation": run_id,
-                "specialty_code": "01",
+                "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
@@ -267,23 +269,172 @@ def test_facilities_requires_city_and_specialty(dynamodb_env: None) -> None:
 def test_facilities_by_code_returns_matches(dynamodb_env: None) -> None:
     _create_table_and_seed()
     response = _invoke(
-        _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "01"})
+        _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "1001"})
     )
     assert response["statusCode"] == 200
     assert response["body"]["count"] == 1
     item = response["body"]["items"][0]
-    assert item["specialty_code"] == "01"
+    assert item["specialty_code"] == "1001"
 
 
 def test_facilities_by_label_resolves_to_same_code(dynamodb_env: None) -> None:
-    """内科 (label) を渡しても 01 (code) と同じ結果になる (resolve_specialty)"""
+    """内科 (label) を渡しても 1001 (code) と同じ結果になる (resolve_specialty)"""
     _create_table_and_seed()
     response = _invoke(
         _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "内科"})
     )
     assert response["statusCode"] == 200
     assert response["body"]["count"] == 1
-    assert response["body"]["items"][0]["specialty_code"] == "01"
+    assert response["body"]["items"][0]["specialty_code"] == "1001"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("09:00", "09:00:00"),
+        ("9:5", "09:05:00"),
+        ("18:30:45", "18:30:45"),
+        ("00:00", "00:00:00"),
+        ("23:59:59", "23:59:59"),
+    ],
+)
+def test_normalize_time_accepts_valid_forms(raw: str, expected: str) -> None:
+    assert _normalize_time(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "25:00",     # hour out of range
+        "24:00",     # hour boundary — 24 は不許可 (23:59:59 が最大)
+        "12:60",     # minute out of range
+        "12:00:60",  # second out of range
+        "-1:00",     # negative
+        "abc",       # non-digit
+        "",          # empty
+        ":",         # separator only
+        "12",        # no colon
+        "12:00:00:00",  # too many parts
+    ],
+)
+def test_normalize_time_rejects_invalid(raw: str) -> None:
+    with pytest.raises(ValueError):
+        _normalize_time(raw)
+
+
+def test_facilities_filter_by_day_and_time_matches_schedule(dynamodb_env: None) -> None:
+    """day + time 指定時に SCHEDULE との交差で施設が絞り込まれる。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={
+                "city": "千葉市中央区",
+                "specialty": "1001",
+                "day": "MON",
+                "time": "10:00",
+            },
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 1
+
+
+def test_facilities_filter_by_day_and_time_excludes_outside_hours(dynamodb_env: None) -> None:
+    """営業時間外 (17:00 は closes と同時なので受診不可) は除外される。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={
+                "city": "千葉市中央区",
+                "specialty": "1001",
+                "day": "月曜日",  # 表記ゆれに対応
+                "time": "17:00",
+            },
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 0
+
+
+def test_facilities_time_equals_opens_included(dynamodb_env: None) -> None:
+    """time == opens は開店直後として受診可 (境界 <= 側)。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "day": "MON", "time": "09:00"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 1
+
+
+def test_facilities_filter_day_only(dynamodb_env: None) -> None:
+    """day のみ指定時は該当曜日に SCHEDULE がある施設のみ返る。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "day": "MON"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 1
+
+    # 該当曜日に SCHEDULE がない場合は 0 件
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "day": "SUN"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 0
+
+
+def test_facilities_filter_time_only(dynamodb_env: None) -> None:
+    """time のみ指定時は曜日を問わず該当時刻に開いている施設が返る。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "time": "10:00"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 1
+
+
+def test_facilities_invalid_day_returns_error(dynamodb_env: None) -> None:
+    """不正な day は error フィールドを含む 200 応答で返す (API 契約の pin)。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "day": "XYZ"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 0
+    assert "error" in response["body"]
+    assert response["body"]["error"].startswith("invalid day")
+
+
+def test_facilities_invalid_time_returns_error(dynamodb_env: None) -> None:
+    """不正な time (範囲外) も同様に error を返す。"""
+    _create_table_and_seed()
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "time": "25:00"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 0
+    assert "error" in response["body"]
+    assert response["body"]["error"].startswith("invalid time")
 
 
 def test_facility_detail_by_id_returns_metadata_services_schedules(dynamodb_env: None) -> None:
@@ -317,7 +468,7 @@ def test_manifest_switches_facility_search_without_mixing_generations(
 
     _put_manifest("run-A")
     response_a = _invoke(
-        _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "01"})
+        _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "1001"})
     )
     assert response_a["statusCode"] == 200
     assert response_a["body"]["count"] == 1
@@ -325,7 +476,7 @@ def test_manifest_switches_facility_search_without_mixing_generations(
 
     _put_manifest("run-B")
     response_b = _invoke(
-        _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "01"})
+        _apigw_event("/facilities", query={"city": "千葉市中央区", "specialty": "1001"})
     )
     assert response_b["statusCode"] == 200
     assert response_b["body"]["count"] == 1

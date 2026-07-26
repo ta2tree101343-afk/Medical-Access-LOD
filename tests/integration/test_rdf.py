@@ -117,11 +117,11 @@ def test_expected_sample_subset(graph: Graph) -> None:
 
     facility = facility_uri(fid)
 
-    service = service_uri(fid, SpecialtyCode("02"))
+    service = service_uri(fid, SpecialtyCode("3001"))
 
-    schedule_mon = schedule_uri(fid, SpecialtyCode("02"), DayOfWeek.MON, 1)
+    schedule_mon = schedule_uri(fid, SpecialtyCode("3001"), DayOfWeek.MON, 1)
 
-    schedule_sat = schedule_uri(fid, SpecialtyCode("02"), DayOfWeek.SAT, 1)
+    schedule_sat = schedule_uri(fid, SpecialtyCode("3001"), DayOfWeek.SAT, 1)
 
     assert (facility, RDF.type, SCHEMA.MedicalClinic) in graph
 
@@ -190,6 +190,17 @@ def test_dataset_has_void_and_dcat_metadata(graph: Graph) -> None:
         assert (dist, RDF.type, DCAT.Distribution) in graph
         assert list(graph.objects(dist, DCAT.downloadURL))
         assert list(graph.objects(dist, DCAT.mediaType))
+
+    # VoID の統計値が実グラフのカウントと厳密一致していることを固定する。
+    # (dataset_metadata で DCAT distribution を追加する前に count を取ると、
+    #  distribution 由来の subject / class が漏れて off-by-N になる。過去に
+    #  そのバグを踏んだので回帰防止の pin として置く。)
+    distinct_subjects = int(next(iter(graph.objects(ds, VOID.distinctSubjects))))
+    classes = int(next(iter(graph.objects(ds, VOID.classes))))
+    triples = int(next(iter(graph.objects(ds, VOID.triples))))
+    assert distinct_subjects == len(set(graph.subjects()))
+    assert classes == len(set(graph.objects(predicate=RDF.type)))
+    assert triples == len(graph)
 
 
 def test_turtle_roundtrip(graph: Graph, tmp_path: Path) -> None:

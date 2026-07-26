@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "千葉市の医療機関について診療科・診療時間・所在地を統合したLOD"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "CC-BY-4.0" }
+license = { text = "MIT" }
 authors = [{ name = "Medical Access LOD" }]
 dependencies = [
     "aws-lambda-powertools[tracer]>=3.0",

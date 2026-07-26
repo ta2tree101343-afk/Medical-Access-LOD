@@ -34,6 +34,7 @@ function build(): {
     distBucket: delivery.distBucket,
     readModelTable: storage.readModelTable,
     ecrRepository: storage.ecrRepository,
+    imageTag: 'test-sha',
   });
   const api = new ApiStack(app, 'Api', {
     env,
@@ -41,6 +42,7 @@ function build(): {
     readModelTable: storage.readModelTable,
     distBucket: delivery.distBucket,
     ecrRepository: storage.ecrRepository,
+    imageTag: 'test-sha',
   });
   const monitoring = new MonitoringStack(app, 'Monitoring', {
     env,
@@ -48,6 +50,8 @@ function build(): {
     pipelineStateMachine: pipeline.stateMachine,
     apiFunction: api.apiFunction,
     pipelineFunctions: pipeline.pipelineFunctions,
+    cleanupFunction: pipeline.cleanupFunction,
+    cleanupDlq: pipeline.cleanupDlq,
   });
   const identity = new IdentityStack(app, 'Identity', {
     env,
@@ -56,6 +60,7 @@ function build(): {
     githubRepo: 'test-repo',
     ecrRepositoryArn: storage.ecrRepository.repositoryArn,
     distributionArn: `arn:aws:cloudfront::${env.account}:distribution/EXAMPLE`,
+    distBucket: delivery.distBucket,
   });
   return { storage, pipeline, api, delivery, monitoring, identity };
 }
@@ -76,6 +81,7 @@ function buildPipelineWithSource(snapshotDate: string, sourceUrl: string): Pipel
     distBucket: delivery.distBucket,
     readModelTable: storage.readModelTable,
     ecrRepository: storage.ecrRepository,
+    imageTag: 'test-sha',
   });
 }
 
@@ -526,8 +532,18 @@ describe('MonitoringStack', () => {
 
   test('SNS alert topic and CloudWatch alarms exist', () => {
     template.resourceCountIs('AWS::SNS::Topic', 1);
-    // pipeline_failed + shacl + api_5xx + per-fn (Errors+Throttles) = 1+1+1+6*2 = 15
-    template.resourceCountIs('AWS::CloudWatch::Alarm', 15);
+    // pipeline_failed + shacl + api_5xx + per-fn (Errors+Throttles) + cleanup errors + cleanup DLQ
+    // = 1 + 1 + 1 + 6*2 + 1 + 1 = 17
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 17);
+  });
+
+  test('Cleanup error and DLQ alarms are wired to the SNS topic', () => {
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      AlarmName: Match.stringLikeRegexp('cleanup-errors$'),
+    });
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      AlarmName: Match.stringLikeRegexp('cleanup-dlq-messages$'),
+    });
   });
 });
 
@@ -555,5 +571,80 @@ describe('IdentityStack', () => {
         ]),
       }),
     });
+  });
+
+  // 書き込み系権限が `latest/*` に限定され、releases/ archives/ を巻き添えに
+  // しないことを固定する (公開世代の履歴データを CI 経由で消せないことが目的)。
+  test('S3 write actions are scoped strictly to latest/* prefix', () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(['s3:PutObject', 's3:DeleteObject']),
+            Resource: Match.objectLike({
+              'Fn::Join': [
+                '',
+                Match.arrayWith([Match.stringLikeRegexp('/latest/\\*$')]),
+              ],
+            }),
+          }),
+        ]),
+      }),
+    });
+  });
+
+  test('ListBucket carries s3:prefix condition; GetBucketLocation is a separate statement', () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          // ListBucket は prefix condition つき
+          Match.objectLike({
+            Action: 's3:ListBucket',
+            Condition: Match.objectLike({
+              StringLike: Match.objectLike({
+                's3:prefix': Match.arrayWith(['latest/*']),
+              }),
+            }),
+          }),
+          // GetBucketLocation は condition なし (prefix key を持たないため)
+          Match.objectLike({
+            Action: 's3:GetBucketLocation',
+          }),
+        ]),
+      }),
+    });
+  });
+});
+
+describe('ECR image tag propagation (SHA-based, fixes stale-Lambda bug)', () => {
+  const { pipeline, api } = build();
+  const pipelineTemplate = Template.fromStack(pipeline);
+  const apiTemplate = Template.fromStack(api);
+
+  // すべての Lambda が `imageTag` 経由の同一 ECR reference を使うことを固定する。
+  // 誰かが `tagOrDigest: spec.key.toLowerCase()` に戻すと、その関数だけ
+  // CFN が ECR image の変更を差分検知できなくなる (=世代 GC PR で修正した
+  // まさにその不具合)。
+  const assertAllFunctionsUseSha = (template: Template) => {
+    const functions = template.findResources('AWS::Lambda::Function');
+    const values = Object.values(functions);
+    expect(values.length).toBeGreaterThan(0);
+    for (const fn of values) {
+      const uri = (fn.Properties as any).Code?.ImageUri;
+      const joinParts = uri?.['Fn::Join']?.[1] as unknown[] | undefined;
+      const literal = joinParts
+        ?.filter((p) => typeof p === 'string')
+        .join('');
+      // Fn::Join の literal 末尾 (":test-sha") に SHA が現れる。
+      expect(literal).toContain(':test-sha');
+    }
+  };
+
+  test('every Pipeline Lambda references imageTag (:test-sha)', () => {
+    assertAllFunctionsUseSha(pipelineTemplate);
+  });
+
+  test('Api Lambda references imageTag (:test-sha)', () => {
+    assertAllFunctionsUseSha(apiTemplate);
   });
 });

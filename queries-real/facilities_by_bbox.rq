@@ -11,7 +11,7 @@ WHERE {
     ?geo schema:latitude ?lat ;
          schema:longitude ?lon .
 
-    FILTER(?type IN (schema:Hospital, schema:MedicalClinic))
+    FILTER(?type IN (schema:Hospital, schema:MedicalClinic, schema:Dentist))
     FILTER(?lat >= 35.60 && ?lat <= 35.63 && ?lon >= 140.08 && ?lon <= 140.15)
 }
 ORDER BY ?name

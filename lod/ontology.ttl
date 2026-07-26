@@ -45,22 +45,4 @@ ex:hasSchedule
 <concept/specialty>
     a skos:ConceptScheme ;
     skos:prefLabel "標榜診療科"@ja , "Medical Specialties"@en ;
-    rdfs:comment "本LODで用いる診療科の暫定コード体系。確定後に公式コード体系へ skos:exactMatch で接続する。"@ja .
-
-<concept/specialty/01>
-    a skos:Concept ;
-    skos:inScheme <concept/specialty> ;
-    skos:prefLabel "内科"@ja , "Internal Medicine"@en ;
-    skos:notation "01" .
-
-<concept/specialty/02>
-    a skos:Concept ;
-    skos:inScheme <concept/specialty> ;
-    skos:prefLabel "小児科"@ja , "Pediatrics"@en ;
-    skos:notation "02" .
-
-<concept/specialty/03>
-    a skos:Concept ;
-    skos:inScheme <concept/specialty> ;
-    skos:prefLabel "皮膚科"@ja , "Dermatology"@en ;
-    skos:notation "03" .
+    rdfs:comment "本 LOD で用いる診療科の概念スキーム。個々の skos:Concept は出典 (厚生労働省 医療情報ネット) が付与する 4 桁の診療科コード (例: 1001=内科, 3001=小児科, 6001=皮膚科) を skos:notation とし、ラベルを skos:prefLabel@ja で保持する。公式標榜診療科コード体系が確定した際は skos:exactMatch で接続する。実際の Concept 集合はデータ (medical-access-lod.ttl) 側で提供される。"@ja .

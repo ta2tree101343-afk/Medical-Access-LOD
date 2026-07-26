@@ -58,17 +58,24 @@ jobs:
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076
 
       - name: Build and push Docker image
+        id: build
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           ENV_NAME: ${{ inputs.env }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
+          # commit SHA を Lambda 参照用の一意タグに使う。従来は関数ごとの固定タグ
+          # (download / normalize / ...) を毎ビルドで上書きしていたため、
+          # CloudFormation が ECR image の変更を差分として検知できず Lambda が
+          # 古い image のまま放置される問題があった。SHA タグは commit 単位で
+          # 一意 & 不変になるので、CDK の tagOrDigest に渡すだけで確実に
+          # Lambda が更新される。
+          # `latest` は人間向けのタグとして併記して push する (Lambda は参照しない)。
           REPO="$REGISTRY/medical-access-lod-$ENV_NAME-pipeline"
-          docker build --platform linux/arm64 -t "$REPO:latest" .
-          for TAG in download normalize buildrdf validate publish buildreadmodel cleanup api; do
-            docker tag "$REPO:latest" "$REPO:$TAG"
-            docker push "$REPO:$TAG"
-          done
+          docker build --platform linux/arm64 -t "$REPO:$COMMIT_SHA" -t "$REPO:latest" .
+          docker push "$REPO:$COMMIT_SHA"
           docker push "$REPO:latest"
+          echo "image_tag=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
 
       # actions/setup-node v4.1.0
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
@@ -91,13 +98,15 @@ jobs:
           GH_REPO: ${{ inputs.github_repo }}
           SNAPSHOT_DATE: ${{ inputs.snapshot_date }}
           SOURCE_URL: ${{ inputs.source_url }}
+          IMAGE_TAG: ${{ steps.build.outputs.image_tag }}
         run: |
           npx cdk deploy --all --require-approval never \
             -c env="$ENV_NAME" \
             -c githubOwner="$GH_OWNER" \
             -c githubRepo="$GH_REPO" \
             -c snapshotDate="$SNAPSHOT_DATE" \
-            -c sourceUrl="$SOURCE_URL"
+            -c sourceUrl="$SOURCE_URL" \
+            -c imageTag="$IMAGE_TAG"
 
       - name: Sync lod/ to dist bucket
         env:
