@@ -7,6 +7,6 @@ WHERE {
     ?facility ex:offersClinicalService ?service ;
               schema:name ?name .
 
-    ?service ex:medicalSpecialty <concept/specialty/01> .
+    ?service ex:medicalSpecialty <concept/specialty/1001> .
 }
 ORDER BY ?name

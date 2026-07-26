@@ -84,7 +84,7 @@ def add_dataset_metadata(graph: Graph, metadata: DatasetMetadata | None = None) 
     for kw in metadata.keywords:
         graph.add((ds, DCAT.keyword, Literal(kw)))
 
-    # VoID: statistics
+    # VoID: vocabularies / uriSpace / dataDump (統計以外)
     graph.add((ds, VOID.uriSpace, Literal(BASE)))
     for voc in (
         "https://schema.org/",
@@ -94,19 +94,7 @@ def add_dataset_metadata(graph: Graph, metadata: DatasetMetadata | None = None) 
         graph.add((ds, VOID.vocabulary, URIRef(voc)))
     graph.add((ds, VOID.dataDump, URIRef(metadata.dump_ttl_url)))
 
-    # Entity/class counts (approximate)
-    facility_count = 0
-    for cls in (SCHEMA.Hospital, SCHEMA.MedicalClinic, SCHEMA.Dentist):
-        facility_count += len(list(graph.subjects(RDF.type, cls)))
-    graph.add((ds, VOID.entities, Literal(facility_count, datatype=XSD.integer)))
-    graph.add(
-        (ds, VOID.classes, Literal(len(set(graph.objects(predicate=RDF.type))), datatype=XSD.integer))
-    )
-    graph.add(
-        (ds, VOID.distinctSubjects, Literal(len(set(graph.subjects())), datatype=XSD.integer))
-    )
-
-    # DCAT distributions
+    # DCAT distributions (新規 subject を追加するため VoID 統計より先に発火)
     for fmt, url, media_type in (
         ("Turtle", metadata.dump_ttl_url, "text/turtle"),
         ("JSON-LD", metadata.dump_jsonld_url, "application/ld+json"),
@@ -120,5 +108,19 @@ def add_dataset_metadata(graph: Graph, metadata: DatasetMetadata | None = None) 
         graph.add((dist, DCAT.downloadURL, URIRef(url)))
         graph.add((dist, DCAT.accessURL, URIRef(url)))
 
-    # void:triples: 自己参照になるが、後付けで最終カウントを載せる
+    # VoID: 統計値。ここで DCAT.Distribution 型と 2 つの distribution subject を
+    # 含めた最終状態のグラフに対してカウントするため、実グラフと数値が一致する。
+    facility_count = sum(
+        len(list(graph.subjects(RDF.type, cls)))
+        for cls in (SCHEMA.Hospital, SCHEMA.MedicalClinic, SCHEMA.Dentist)
+    )
+    graph.add((ds, VOID.entities, Literal(facility_count, datatype=XSD.integer)))
+    graph.add(
+        (ds, VOID.classes, Literal(len(set(graph.objects(predicate=RDF.type))), datatype=XSD.integer))
+    )
+    graph.add(
+        (ds, VOID.distinctSubjects, Literal(len(set(graph.subjects())), datatype=XSD.integer))
+    )
+
+    # void:triples は自己参照。追加後の総トリプル数を +1 (自身) で載せる。
     graph.add((ds, VOID.triples, Literal(len(graph) + 1, datatype=XSD.integer)))

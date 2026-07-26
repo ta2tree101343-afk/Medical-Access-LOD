@@ -30,11 +30,11 @@ def test_facility_id_rejects_invalid() -> None:
 
 def test_specialty_code_and_resolver() -> None:
 
-    assert SpecialtyCode("01") == "01"
+    assert SpecialtyCode("1001") == "1001"
 
-    assert resolve_specialty("内科") == "01"
+    assert resolve_specialty("内科") == "1001"
 
-    assert resolve_specialty("02") == "02"
+    assert resolve_specialty("3001") == "3001"
 
     with pytest.raises(ValueError):
         resolve_specialty("宇宙外科")
@@ -42,12 +42,30 @@ def test_specialty_code_and_resolver() -> None:
 
 def test_day_of_week_from_source() -> None:
 
+    # 略号 (MON) / フル英名 (Monday)
     assert DayOfWeek.from_source("MON") == DayOfWeek.MON
+    assert DayOfWeek.from_source("Monday") == DayOfWeek.MON
+    assert DayOfWeek.from_source("monday") == DayOfWeek.MON
 
+    # 日本語 (1 文字 / 「曜」 / 「曜日」の 3 表記のみ許容)
     assert DayOfWeek.from_source("土") == DayOfWeek.SAT
+    assert DayOfWeek.from_source("月曜") == DayOfWeek.MON
+    assert DayOfWeek.from_source("月曜日") == DayOfWeek.MON
 
     with pytest.raises(ValueError):
         DayOfWeek.from_source("XYZ")
+
+    # 空文字は明示的に拒否 (silent fallback を防ぐ)
+    with pytest.raises(ValueError):
+        DayOfWeek.from_source("")
+
+    # prefix-only での誤マッチ回避: 「月末」「日本」「火事」は day ではない
+    with pytest.raises(ValueError):
+        DayOfWeek.from_source("月末")
+    with pytest.raises(ValueError):
+        DayOfWeek.from_source("日本")
+    with pytest.raises(ValueError):
+        DayOfWeek.from_source("火事")
 
 
 def test_normalize_time_variants() -> None:

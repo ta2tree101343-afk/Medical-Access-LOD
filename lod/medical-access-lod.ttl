@@ -13,16 +13,16 @@
 <dataset> a void:Dataset,
         dcat:Dataset ;
     dct:description "厚生労働省 医療情報ネットのオープンデータ (PDL 1.0) を出典に、千葉市6区の医療機関について 診療科・診療時間・所在地・位置情報 を 統合した LOD。中間ノード ex:ClinicalService により 施設 x 診療科 x 診療時間 の 3 項関係を表現する。"@ja ;
-    dct:issued "2026-07-19T12:07:34.047110+00:00"^^xsd:dateTime ;
+    dct:issued "2026-07-26T04:58:08.010540+00:00"^^xsd:dateTime ;
     dct:language "ja" ;
     dct:license <https://www.digital.go.jp/resources/data/public_data_license> ;
     dct:rights "PDL 1.0" ;
     dct:source "厚生労働省 医療情報ネット"@ja ;
     dct:temporal "2025-12-01" ;
     dct:title "Medical Access LOD (千葉市)"@ja ;
-    void:classes 12 ;
+    void:classes 13 ;
     void:dataDump <https://raw.githubusercontent.com/ta2tree101343-afk/Medical-Access-LOD/main/lod/medical-access-lod.ttl> ;
-    void:distinctSubjects 27160 ;
+    void:distinctSubjects 27162 ;
     void:entities 897 ;
     void:triples 127883 ;
     void:uriSpace "https://example.org/medical-access/" ;

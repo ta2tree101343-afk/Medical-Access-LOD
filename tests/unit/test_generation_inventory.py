@@ -36,7 +36,7 @@ def _list_keys(bucket: str, prefix: str) -> list[str]:
 
 def test_write_inventory_produces_manifest_and_single_chunk(s3_env: str) -> None:
     prefix = "generations/run-A/inventory/"
-    keys = [("GENERATION#run-A#F1", "METADATA"), ("GENERATION#run-A#F1", "SERVICE#01")]
+    keys = [("GENERATION#run-A#F1", "METADATA"), ("GENERATION#run-A#F1", "SERVICE#1001")]
     manifest = generation_inventory.write_inventory(s3_env, prefix, iter(keys), run_id="run-A")
 
     assert manifest["item_count"] == 2
@@ -103,7 +103,7 @@ def test_write_inventory_chunk_files_are_valid_gzip_jsonl(s3_env: str) -> None:
     prefix = "generations/run-C/inventory/"
     keys = [
         ("GENERATION#run-C#F1", "METADATA"),
-        ("GENERATION#run-C#F1", "SCHEDULE#01#Monday#09:00:00"),
+        ("GENERATION#run-C#F1", "SCHEDULE#1001#Monday#09:00:00"),
     ]
     generation_inventory.write_inventory(s3_env, prefix, iter(keys), run_id="run-C")
 
@@ -117,7 +117,7 @@ def test_write_inventory_chunk_files_are_valid_gzip_jsonl(s3_env: str) -> None:
     records = [json.loads(line) for line in lines]
     assert records == [
         {"PK": "GENERATION#run-C#F1", "SK": "METADATA"},
-        {"PK": "GENERATION#run-C#F1", "SK": "SCHEDULE#01#Monday#09:00:00"},
+        {"PK": "GENERATION#run-C#F1", "SK": "SCHEDULE#1001#Monday#09:00:00"},
     ]
 
 

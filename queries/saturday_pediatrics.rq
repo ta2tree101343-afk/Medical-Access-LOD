@@ -7,7 +7,7 @@ WHERE {
     ?facility ex:offersClinicalService ?service ;
               schema:name ?name .
 
-    ?service ex:medicalSpecialty <concept/specialty/02> ;
+    ?service ex:medicalSpecialty <concept/specialty/3001> ;
              ex:hasSchedule ?schedule .
 
     ?schedule schema:dayOfWeek schema:Saturday ;

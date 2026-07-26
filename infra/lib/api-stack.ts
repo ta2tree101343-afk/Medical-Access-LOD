@@ -13,6 +13,8 @@ export interface ApiStackProps extends cdk.StackProps {
   readModelTable: dynamodb.Table;
   distBucket: s3.Bucket;
   ecrRepository: ecr.Repository;
+  /** ECR image tag (通常は commit SHA)。pipeline-stack と同じ値を渡す。 */
+  imageTag: string;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -25,7 +27,7 @@ export class ApiStack extends cdk.Stack {
     this.apiFunction = new lambda.DockerImageFunction(this, 'ApiFunction', {
       functionName: `medical-access-lod-${props.envName}-api`,
       code: lambda.DockerImageCode.fromEcr(props.ecrRepository, {
-        tagOrDigest: 'api',
+        tagOrDigest: props.imageTag,
         cmd: ['medical_access_lod.functions.api.handler.lambda_handler'],
       }),
       architecture: lambda.Architecture.ARM_64,

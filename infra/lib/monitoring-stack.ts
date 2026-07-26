@@ -3,6 +3,7 @@ import * as cw from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import { Construct } from 'constructs';
 
@@ -11,6 +12,10 @@ export interface MonitoringStackProps extends cdk.StackProps {
   pipelineStateMachine: sfn.StateMachine;
   apiFunction: lambda.Function;
   pipelineFunctions: Record<string, lambda.Function>;
+  /** 世代 GC (Cleanup) Lambda 本体。エラーアラーム用。 */
+  cleanupFunction: lambda.Function;
+  /** Cleanup DLQ。メッセージ滞留アラーム用 (再配信 3 回失敗 = 運用者に届く)。 */
+  cleanupDlq: sqs.Queue;
 }
 
 export class MonitoringStack extends cdk.Stack {
@@ -64,6 +69,32 @@ export class MonitoringStack extends cdk.Stack {
       alarmName: `medical-access-lod-${props.envName}-api-5xx`,
       metric: props.apiFunction.metricErrors({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
       threshold: 5,
+      evaluationPeriods: 1,
+      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(alertAction);
+
+    // Cleanup Lambda errors (世代 GC の Lambda 例外)
+    new cw.Alarm(this, 'CleanupErrorAlarm', {
+      alarmName: `medical-access-lod-${props.envName}-cleanup-errors`,
+      metric: props.cleanupFunction.metricErrors({
+        period: cdk.Duration.minutes(5),
+        statistic: 'Sum',
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(alertAction);
+
+    // Cleanup DLQ にメッセージが到達 = 再配信 3 回とも失敗 → 運用者が要調査
+    new cw.Alarm(this, 'CleanupDlqAlarm', {
+      alarmName: `medical-access-lod-${props.envName}-cleanup-dlq-messages`,
+      metric: props.cleanupDlq.metricApproximateNumberOfMessagesVisible({
+        period: cdk.Duration.minutes(5),
+        statistic: 'Maximum',
+      }),
+      threshold: 1,
       evaluationPeriods: 1,
       comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cw.TreatMissingData.NOT_BREACHING,

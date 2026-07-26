@@ -7,8 +7,8 @@
 
 | ファイル | 説明 |
 | --- | --- |
-| `medical-access-lod.ttl` | Turtle 形式（4.8 MB） |
-| `medical-access-lod.jsonld` | JSON-LD 形式（9.2 MB） |
+| `medical-access-lod.ttl` | Turtle 形式（8.1 MB） |
+| `medical-access-lod.jsonld` | JSON-LD 形式（16.9 MB） |
 | `ontology.ttl` | 独自オントロジー + SKOS 診療科スキーム |
 | `shapes.ttl` | SHACL Shapes（適合を確認済み） |
 | `statistics.json` | 件数統計と SPARQL 例のヒット数 |
@@ -26,10 +26,11 @@
 
 | 指標 | 値 |
 | --- | --- |
-| RDF トリプル | **127,842** |
+| RDF トリプル | **127,883** |
 | 医療機関 | 897（病院 40 / 診療所 469 / 歯科診療所 388） |
 | 診療サービス（施設 × 診療科） | 2,586 |
 | 診療時間スロット | 21,795 |
+| 診療科 (SKOS Concept) | 85 |
 | 位置情報付き施設 (schema:geo) | 原データ由来 |
 
 ## ダウンロード URL
@@ -53,7 +54,7 @@ https://raw.githubusercontent.com/ta2tree101343-afk/Medical-Access-LOD/main/lod/
 ## SPARQL 例（RDFLib での確認済み件数）
 
 ```sparql
-# 内科（1001）を提供する医療機関 — 265 件
+# 内科（1001）を提供する医療機関 — 施設 265 / 結果行 265
 BASE <https://example.org/medical-access/>
 PREFIX ex: <https://example.org/medical-access/>
 PREFIX schema: <https://schema.org/>
@@ -66,7 +67,7 @@ ORDER BY ?name
 ```
 
 ```sparql
-# 千葉市中央区で平日18時以降に受診できる皮膚科 — 43 件
+# 千葉市中央区で平日18時以降に受診できる皮膚科 — 施設 10 / 結果行 43
 # 時刻比較は STR() で行う（RDFLib は xsd:time の順序比較を実装しないため）
 BASE <https://example.org/medical-access/>
 PREFIX ex: <https://example.org/medical-access/>
@@ -82,7 +83,7 @@ SELECT DISTINCT ?facility ?name ?dayOfWeek ?opens ?closes WHERE {
 ```
 
 ```sparql
-# 診療科カタログ (SKOSスキーム全一覧) — 82 件
+# 診療科カタログ (SKOSスキーム全一覧) — 85 件
 BASE <https://example.org/medical-access/>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 SELECT ?code ?label WHERE {
@@ -94,7 +95,7 @@ ORDER BY ?code
 ```
 
 ```sparql
-# 診療科名 (label) で検索 : 「内科」 — 265 件
+# 診療科名 (label) で検索 : 「内科」 — 施設 265 / 結果行 265
 # コード (1001) を知らなくても人間可読な名前で辿れる
 BASE <https://example.org/medical-access/>
 PREFIX ex: <https://example.org/medical-access/>
@@ -110,7 +111,7 @@ ORDER BY ?name
 ```
 
 ```sparql
-# 区別の施設数集計 — 6 件 (中央141 / 花見川87 / 美浜82 / 稲毛79 / 緑65 / 若葉55)
+# 区別の施設数集計 — 6 件 (中央266 / 稲毛149 / 花見川147 / 美浜132 / 緑102 / 若葉101)
 BASE <https://example.org/medical-access/>
 PREFIX schema: <https://schema.org/>
 SELECT ?ward (COUNT(DISTINCT ?facility) AS ?count) WHERE {
@@ -122,13 +123,13 @@ ORDER BY DESC(?count)
 ```
 
 ```sparql
-# 千葉駅周辺 (bounding box) の医療機関 — 111 件
+# 千葉駅周辺 (bounding box) の医療機関 — 216 件（病院 + 診療所 + 歯科）
 BASE <https://example.org/medical-access/>
 PREFIX schema: <https://schema.org/>
 SELECT ?facility ?name ?lat ?lon WHERE {
   ?facility a ?type ; schema:name ?name ; schema:geo ?geo .
   ?geo schema:latitude ?lat ; schema:longitude ?lon .
-  FILTER(?type IN (schema:Hospital, schema:MedicalClinic))
+  FILTER(?type IN (schema:Hospital, schema:MedicalClinic, schema:Dentist))
   FILTER(?lat >= 35.60 && ?lat <= 35.63 && ?lon >= 140.08 && ?lon <= 140.15)
 }
 ORDER BY ?name

@@ -6,20 +6,22 @@ from typing import Any
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
 
-_CODE_PATTERN = re.compile(r"^[0-9]{2,4}$")
+# 厚生労働省 医療情報ネットの標榜診療科コードは 4 桁 (例: 1001=内科, 3001=小児科)。
+# 2 桁のプレースホルダは 2026-07 に廃止済 (fixture も 4 桁に統一)。
+_CODE_PATTERN = re.compile(r"^[0-9]{4}$")
 
 
 DISPLAY_TO_CODE: dict[str, str] = {
-    "内科": "01",
-    "小児科": "02",
-    "皮膚科": "03",
+    "内科": "1001",
+    "小児科": "3001",
+    "皮膚科": "6001",
 }
 
 CODE_TO_DISPLAY: dict[str, str] = {v: k for k, v in DISPLAY_TO_CODE.items()}
 
 
 class SpecialtyCode(str):
-    """診療科の暫定コード (2桁ゼロ埋め文字列)。"""
+    """診療科コード (厚生労働省 医療情報ネットの 4 桁コード)。"""
 
     __slots__ = ()
 

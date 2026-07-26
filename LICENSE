@@ -1,0 +1,41 @@
+Medical Access LOD — ライセンス
+
+このリポジトリは 2 種類の資産を含み、それぞれ異なるライセンスで提供する。
+
+============================================================
+1. コード (src/, infra/, tests/, ontology/, queries*/) — MIT License
+============================================================
+
+MIT License
+
+Copyright (c) 2025-2026 藤田樹 (ta2tree101343-afk)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+============================================================
+2. LOD データ (lod/*.ttl, lod/*.jsonld, lod/statistics.json)
+   — 公共データ利用規約 (PDL) 1.0
+============================================================
+
+原データ「厚生労働省 医療情報ネットのオープンデータ」の派生物として、
+公共データ利用規約 (PDL) 1.0 に従い提供する。
+再利用時は出典「厚生労働省 医療情報ネット」を明記すること。
+
+- 原データ: https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/iryou/newpage_43373.html
+- 利用規約: https://www.digital.go.jp/resources/open_data/public_data_license_v1.0

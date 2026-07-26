@@ -23,6 +23,11 @@ const defaultSourceUrl =
   '/resource/af88450b-049c-4deb-8dc9-327312d877e1/download/e-gov20251201.zip';
 const snapshotDate = String(app.node.tryGetContext('snapshotDate') ?? defaultSnapshotDate);
 const sourceUrl = String(app.node.tryGetContext('sourceUrl') ?? defaultSourceUrl);
+// deploy.yml が `-c imageTag=<sha>` で渡す。ローカル `cdk synth` では 'latest' で代用する。
+// `??` は空文字列でフォールバックしないため、CI で outputs 未設定になった場合の
+// silent-fail を避けるべく `||` を使い、空/空白の場合も 'latest' に落とす。
+const rawImageTag = String(app.node.tryGetContext('imageTag') ?? '').trim();
+const imageTag = rawImageTag || 'latest';
 
 const prefix = `MedicalAccessLod-${envName}`;
 
@@ -44,6 +49,7 @@ const pipeline = new PipelineStack(app, `${prefix}-Pipeline`, {
   distBucket: delivery.distBucket,
   readModelTable: storage.readModelTable,
   ecrRepository: storage.ecrRepository,
+  imageTag,
 });
 
 const api = new ApiStack(app, `${prefix}-Api`, {
@@ -52,6 +58,7 @@ const api = new ApiStack(app, `${prefix}-Api`, {
   readModelTable: storage.readModelTable,
   distBucket: delivery.distBucket,
   ecrRepository: storage.ecrRepository,
+  imageTag,
 });
 
 new MonitoringStack(app, `${prefix}-Monitoring`, {
@@ -60,6 +67,8 @@ new MonitoringStack(app, `${prefix}-Monitoring`, {
   pipelineStateMachine: pipeline.stateMachine,
   apiFunction: api.apiFunction,
   pipelineFunctions: pipeline.pipelineFunctions,
+  cleanupFunction: pipeline.cleanupFunction,
+  cleanupDlq: pipeline.cleanupDlq,
 });
 
 new IdentityStack(app, `${prefix}-Identity`, {
@@ -69,6 +78,7 @@ new IdentityStack(app, `${prefix}-Identity`, {
   githubRepo,
   ecrRepositoryArn: storage.ecrRepository.repositoryArn,
   distributionArn: delivery.distributionArn,
+  distBucket: delivery.distBucket,
 });
 
 app.synth();

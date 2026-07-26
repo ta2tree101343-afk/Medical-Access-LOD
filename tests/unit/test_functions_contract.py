@@ -212,28 +212,28 @@ def test_build_read_model_items_shape() -> None:
                 },
             }
         ],
-        "services": [{"facility_id": "F1", "specialty_code": "01"}],
+        "services": [{"facility_id": "F1", "specialty_code": "1001"}],
         "schedules": [
             {
                 "facility_id": "F1",
-                "specialty_code": "01",
+                "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
             }
         ],
-        "specialty_labels": {"01": "内科"},
+        "specialty_labels": {"1001": "内科"},
     }
     items = _build_items(payload, generation="test-run-001")
     pks = {(i["PK"], i["SK"]) for i in items}
     assert ("GENERATION#test-run-001#FACILITY#F1", "METADATA") in pks
-    assert ("GENERATION#test-run-001#FACILITY#F1", "SERVICE#01") in pks
+    assert ("GENERATION#test-run-001#FACILITY#F1", "SERVICE#1001") in pks
     assert (
         "GENERATION#test-run-001#FACILITY#F1",
-        "SCHEDULE#01#Monday#09:00:00",
+        "SCHEDULE#1001#Monday#09:00:00",
     ) in pks
     # SKOS label should propagate
-    svc = next(i for i in items if i["SK"] == "SERVICE#01")
+    svc = next(i for i in items if i["SK"] == "SERVICE#1001")
     assert svc["specialty_label"] == "内科"
     # manifestが指す世代だけをAPIが参照できる。
     assert all(i["generation"] == "test-run-001" for i in items)

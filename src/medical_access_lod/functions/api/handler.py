@@ -11,6 +11,7 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from medical_access_lod.domain.values.day_of_week import DayOfWeek
 from medical_access_lod.domain.values.medical_specialty import resolve_specialty
 from medical_access_lod.functions.shared.observability import logger, metrics, tracer
 from medical_access_lod.functions.shared.s3io import get_json
@@ -126,19 +127,62 @@ def specialties() -> dict[str, Any]:
     }
 
 
+def _normalize_time(raw: str) -> str:
+    """`HH:MM` / `HH:MM:SS` を `HH:MM:SS` に正規化する。SPARQL の時刻比較と同じ表現に揃える。
+
+    range を検証しない実装だと `"30:00"` が `"30:00:00"` として通り、以降の
+    文字列比較で常に false → API が空結果を返す silent 失敗になる。
+    受診時刻として意味のある `0 <= hh <= 23`, `0 <= mm/ss <= 59` に強制する。
+    """
+    parts = raw.strip().split(":")
+    if len(parts) == 2:
+        hh, mm = parts
+        ss = "00"
+    elif len(parts) == 3:
+        hh, mm, ss = parts
+    else:
+        raise ValueError(f"invalid time: {raw!r}")
+    if not (hh.isdigit() and mm.isdigit() and ss.isdigit()):
+        raise ValueError(f"invalid time: {raw!r}")
+    h, m, s = int(hh), int(mm), int(ss)
+    if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59):
+        raise ValueError(f"time out of range: {raw!r}")
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
 @app.get("/facilities")
 @tracer.capture_method
 def list_facilities() -> dict[str, Any]:
     city = app.current_event.get_query_string_value(name="city", default_value=None)
     specialty_raw = app.current_event.get_query_string_value(name="specialty", default_value=None)
+    day_raw = app.current_event.get_query_string_value(name="day", default_value=None)
+    time_raw = app.current_event.get_query_string_value(name="time", default_value=None)
 
     if not city or not specialty_raw:
-        return {"items": [], "count": 0, "hint": "specify ?city= and ?specialty= (code or label)"}
+        return {
+            "items": [],
+            "count": 0,
+            "hint": "specify ?city= and ?specialty= (code or label); optional ?day= and ?time=HH:MM",
+        }
 
     try:
         specialty = str(resolve_specialty(specialty_raw))
     except ValueError:
         specialty = specialty_raw
+
+    day: str | None = None
+    if day_raw:
+        try:
+            day = DayOfWeek.from_source(day_raw).value  # "Monday" 等の schema.org ローカル名
+        except ValueError:
+            return {"items": [], "count": 0, "error": f"invalid day: {day_raw!r}"}
+
+    time_norm: str | None = None
+    if time_raw:
+        try:
+            time_norm = _normalize_time(time_raw)
+        except ValueError:
+            return {"items": [], "count": 0, "error": f"invalid time: {time_raw!r}"}
 
     generation = _active_generation()
     response = _table().query(
@@ -147,6 +191,34 @@ def list_facilities() -> dict[str, Any]:
         & Key("GSI1SK").begins_with(f"SPECIALTY#{specialty}#"),
     )
     items = response.get("Items", [])
+
+    # day/time 指定時は、該当施設に条件を満たす SCHEDULE があるか確認する。
+    # 時刻比較は SPARQL 側と同じく文字列 (STR) 比較で行う (HH:MM:SS 24 時制で辞書順 = 時刻順)。
+    if day or time_norm:
+        table = _table()
+        filtered: list[dict[str, Any]] = []
+        for item in items:
+            pk = item.get("PK")
+            if not isinstance(pk, str):
+                continue
+            resp = table.query(
+                KeyConditionExpression=Key("PK").eq(pk)
+                & Key("SK").begins_with(f"SCHEDULE#{specialty}#"),
+            )
+            for sched in resp.get("Items", []):
+                if day and sched.get("day_of_week") != day:
+                    continue
+                opens = sched.get("opens", "")
+                closes = sched.get("closes", "")
+                if time_norm:
+                    if not (isinstance(opens, str) and isinstance(closes, str)):
+                        continue
+                    if not (opens <= time_norm < closes):
+                        continue
+                filtered.append(item)
+                break
+        items = filtered
+
     return {"items": items, "count": len(items)}
 
 
