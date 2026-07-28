@@ -85,15 +85,21 @@ def _build_items(payload: dict[str, Any], generation: str) -> list[dict[str, Any
         day = sched["day_of_week"]
         opens = sched["opens"]
         closes = sched["closes"]
+        facility = facilities.get(fid, {})
+        city = facility.get("address", {}).get("city", "")
+        # facility_id / city を明示属性として持たせることで、GSI2 単発 Query の結果
+        # だけで city フィルタと施設 join が完結する (API 側の N+1 を消すため)。
         items.append(
             {
                 "PK": f"GENERATION#{generation}#FACILITY#{fid}",
                 "SK": f"SCHEDULE#{code}#{day}#{opens}",
                 _GENERATION_ATTR: generation,
+                "facility_id": fid,
                 "specialty_code": code,
                 "day_of_week": day,
                 "opens": opens,
                 "closes": closes,
+                "city": city,
                 "GSI2PK": f"GENERATION#{generation}#SPECIALTY#{code}#DAY#{day}",
                 "GSI2SK": f"OPEN#{opens}#FACILITY#{fid}",
             }

@@ -3,13 +3,16 @@
 方針: 保守的側に倒す。以下のいずれかに該当したら削除しない。
 
 1. 現在の公開 manifest が指す run_id: 参照中のため絶対に削除しない
-2. status が STAGED / DELETED: STAGED は未完了 (書き込み途中)、DELETED は
-   既に完了しているので何もしない
-3. 直近 N 世代 (default 6, 最新 committed_at の降順)
-4. committed_at からの経過が最低保持期間 (default 365 日) 未満
+2. status が DELETED: 既に完了しているので何もしない
+3. status が STAGED かつ staged_at からの経過が staged_ttl_hours
+   (default 24h = DEFAULT_STAGED_TTL_HOURS) 未満:
+   Publish/BuildReadModel が実行中の可能性があるため待つ
+4. 直近 N 世代 (default 6, 最新 committed_at の降順)
+5. committed_at からの経過が最低保持期間 (default 365 日) 未満
 
-上記全てを潜り抜けた COMMITTED / DELETING の世代のみが削除対象になる。
+上記全てを潜り抜けた COMMITTED / DELETING / 期限切れ STAGED が削除対象になる。
 DELETING は "前回途中で落ちた" ものを resume するために対象に含む。
+期限切れ STAGED は BuildReadModel/Publish が途中失敗して残った孤立世代の回収。
 """
 from __future__ import annotations
 
@@ -19,18 +22,23 @@ from typing import Any
 
 DEFAULT_KEEP_LAST_N = 6
 DEFAULT_MIN_AGE_DAYS = 365
+# STAGED 状態が続いてよい上限。24h あれば通常の Publish 再試行はすべて収束する。
+DEFAULT_STAGED_TTL_HOURS = 24
 
 
 @dataclass(frozen=True)
 class RetentionPolicy:
     keep_last_n: int = DEFAULT_KEEP_LAST_N
     min_age_days: int = DEFAULT_MIN_AGE_DAYS
+    staged_ttl_hours: int = DEFAULT_STAGED_TTL_HOURS
 
     def __post_init__(self) -> None:
         if self.keep_last_n < 1:
             raise ValueError("keep_last_n must be >= 1")
         if self.min_age_days < 0:
             raise ValueError("min_age_days must be >= 0")
+        if self.staged_ttl_hours < 1:
+            raise ValueError("staged_ttl_hours must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,7 @@ def plan_deletions(
     resolved_policy = policy or RetentionPolicy()
     resolved_now = now if now is not None else int(time.time())
     min_age_seconds = resolved_policy.min_age_days * 86_400
+    staged_ttl_seconds = resolved_policy.staged_ttl_hours * 3_600
 
     # COMMITTED を committed_at 降順で並べる (最新から数える)
     committed = sorted(
@@ -95,6 +104,7 @@ def plan_deletions(
     )
     # DELETING は resume 対象として含めるが retention 順位には数えない
     deleting = [e for e in entries if e.get("status") == "DELETING"]
+    staged = [e for e in entries if e.get("status") == "STAGED"]
 
     keep_reasons: dict[str, str] = {}
     to_delete: list[str] = []
@@ -102,10 +112,19 @@ def plan_deletions(
     for entry in entries:
         rid = _run_id(entry)
         status = entry.get("status")
-        if status == "STAGED":
-            keep_reasons[rid] = "status=STAGED (in-flight)"
-        elif status == "DELETED":
+        if status == "DELETED":
             keep_reasons[rid] = "status=DELETED (already tombstoned)"
+
+    # STAGED: staged_at からの経過で判定。TTL 内 → 保持 (in-flight)、TTL 超え → 削除
+    for entry in staged:
+        rid = _run_id(entry)
+        staged_at = int(entry.get("staged_at") or 0)
+        age = resolved_now - staged_at if staged_at else 0
+        if staged_at == 0 or age < staged_ttl_seconds:
+            keep_reasons[rid] = "status=STAGED (in-flight)"
+        else:
+            # BuildReadModel/Publish が失敗して残った孤立 STAGED 世代を回収する。
+            to_delete.append(rid)
 
     for entry in committed:
         rid = _run_id(entry)

@@ -9,7 +9,11 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from medical_access_lod.functions.api.handler import _normalize_time
+from medical_access_lod.functions.api.handler import (
+    _facility_id_from_pk,
+    _normalize_time,
+    _specialty_day_pk,
+)
 
 TABLE_NAME = "medical-access-lod-test-read-model"
 DIST_BUCKET = "medical-access-lod-test-dist"
@@ -43,6 +47,8 @@ def _create_table_and_seed() -> None:
             {"AttributeName": "SK", "AttributeType": "S"},
             {"AttributeName": "GSI1PK", "AttributeType": "S"},
             {"AttributeName": "GSI1SK", "AttributeType": "S"},
+            {"AttributeName": "GSI2PK", "AttributeType": "S"},
+            {"AttributeName": "GSI2SK", "AttributeType": "S"},
         ],
         GlobalSecondaryIndexes=[
             {
@@ -52,7 +58,15 @@ def _create_table_and_seed() -> None:
                     {"AttributeName": "GSI1SK", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
-            }
+            },
+            {
+                "IndexName": "GSI2_SpecialtyByDay",
+                "KeySchema": [
+                    {"AttributeName": "GSI2PK", "KeyType": "HASH"},
+                    {"AttributeName": "GSI2SK", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
         ],
         BillingMode="PAY_PER_REQUEST",
     )
@@ -85,10 +99,14 @@ def _create_table_and_seed() -> None:
             Item={
                 "PK": "FACILITY#F1",
                 "SK": "SCHEDULE#1001#Monday#09:00:00",
+                "facility_id": "F1",
                 "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
+                "city": "千葉市中央区",
+                "GSI2PK": "SPECIALTY#1001#DAY#Monday",
+                "GSI2SK": "OPEN#09:00:00#FACILITY#F1",
             }
         )
         batch.put_item(
@@ -151,10 +169,14 @@ def _seed_generation(run_id: str, *, name: str, street_address: str) -> None:
                 "PK": pk,
                 "SK": "SCHEDULE#1001#Monday#09:00:00",
                 "generation": run_id,
+                "facility_id": "F1",
                 "specialty_code": "1001",
                 "day_of_week": "Monday",
                 "opens": "09:00:00",
                 "closes": "17:00:00",
+                "city": "千葉市中央区",
+                "GSI2PK": f"GENERATION#{run_id}#SPECIALTY#1001#DAY#Monday",
+                "GSI2SK": "OPEN#09:00:00#FACILITY#F1",
             }
         )
 
@@ -303,6 +325,35 @@ def test_normalize_time_accepts_valid_forms(raw: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("pk", "expected"),
+    [
+        ("FACILITY#F1", "F1"),
+        ("GENERATION#run-X#FACILITY#F1", "F1"),
+        # rfind semantics: `#` を含む facility_id は最後の FACILITY# 以降を取る
+        ("GENERATION#run-X#FACILITY#has#hash", "has#hash"),
+        ("FACILITY#", ""),
+        ("CITY#chuo", None),
+        ("", None),
+    ],
+)
+def test_facility_id_from_pk(pk: Any, expected: Any) -> None:
+    assert _facility_id_from_pk(pk) == expected
+
+
+def test_facility_id_from_pk_rejects_non_string() -> None:
+    assert _facility_id_from_pk(None) is None
+    assert _facility_id_from_pk(123) is None
+
+
+def test_specialty_day_pk_generation_scoped_and_unscoped() -> None:
+    assert _specialty_day_pk("1001", "Monday", None) == "SPECIALTY#1001#DAY#Monday"
+    assert (
+        _specialty_day_pk("1001", "Monday", "run-A")
+        == "GENERATION#run-A#SPECIALTY#1001#DAY#Monday"
+    )
+
+
+@pytest.mark.parametrize(
     "raw",
     [
         "25:00",     # hour out of range
@@ -320,6 +371,39 @@ def test_normalize_time_accepts_valid_forms(raw: str, expected: str) -> None:
 def test_normalize_time_rejects_invalid(raw: str) -> None:
     with pytest.raises(ValueError):
         _normalize_time(raw)
+
+
+def test_facilities_filter_by_day_excludes_other_city_on_same_gsi2pk(dynamodb_env: None) -> None:
+    """GSI2PK は SPECIALTY#code#DAY#day で city を含まないため、city 属性で必ず絞る必要がある。
+    同じ GSI2PK にぶら下がる他区の SCHEDULE を返さないことを固定する (cross-city leak)。"""
+    _create_table_and_seed()
+    table = boto3.resource("dynamodb", region_name="ap-northeast-1").Table(TABLE_NAME)
+    # F2 は花見川区の内科施設で、月曜 SCHEDULE を持たせる (F1 と同一 GSI2PK)
+    table.put_item(
+        Item={
+            "PK": "FACILITY#F2",
+            "SK": "SCHEDULE#1001#Monday#10:00:00",
+            "facility_id": "F2",
+            "specialty_code": "1001",
+            "day_of_week": "Monday",
+            "opens": "10:00:00",
+            "closes": "18:00:00",
+            "city": "千葉市花見川区",
+            "GSI2PK": "SPECIALTY#1001#DAY#Monday",
+            "GSI2SK": "OPEN#10:00:00#FACILITY#F2",
+        }
+    )
+    response = _invoke(
+        _apigw_event(
+            "/facilities",
+            query={"city": "千葉市中央区", "specialty": "1001", "day": "MON", "time": "10:00"},
+        )
+    )
+    assert response["statusCode"] == 200
+    assert response["body"]["count"] == 1
+    # F1 のみが返り、F2 (花見川) は混入しないこと
+    fids = {item["PK"] for item in response["body"]["items"]}
+    assert fids == {"FACILITY#F1"}
 
 
 def test_facilities_filter_by_day_and_time_matches_schedule(dynamodb_env: None) -> None:

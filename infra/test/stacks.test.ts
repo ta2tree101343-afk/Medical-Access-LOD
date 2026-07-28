@@ -186,8 +186,11 @@ describe('PipelineStack', () => {
 
   test('scheduler input uses the configured snapshot and matching HTTPS URL', () => {
     const schedules = template.findResources('AWS::Scheduler::Schedule');
-    const [_, sched] = Object.entries(schedules)[0];
-    const input = JSON.parse(sched.Properties.Target.Input);
+    const biannual = Object.values(schedules).find(
+      (s: any) => s.Properties?.Name === 'medical-access-lod-dev-biannual',
+    );
+    expect(biannual).toBeDefined();
+    const input = JSON.parse(biannual!.Properties.Target.Input);
     expect(input).toEqual({
       snapshot_date: TEST_SNAPSHOT_DATE,
       source_url: TEST_SOURCE_URL,
@@ -233,8 +236,13 @@ describe('PipelineStack', () => {
 
   test('scheduler input carries snapshot_date and source_url (Download の必須項目)', () => {
     const schedules = template.findResources('AWS::Scheduler::Schedule');
-    const [_, sched] = Object.entries(schedules)[0];
-    const input = JSON.parse(sched.Properties.Target.Input);
+    // 半期スナップショット取り込み schedule (biannual) を対象にする。
+    // cleanup-rescan schedule も同じ CFN type を作るためフィルタが必要。
+    const biannual = Object.values(schedules).find(
+      (s: any) => s.Properties?.Name === 'medical-access-lod-dev-biannual',
+    );
+    expect(biannual).toBeDefined();
+    const input = JSON.parse(biannual!.Properties.Target.Input);
     expect(input.snapshot_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(input.source_url).toMatch(/^https:\/\//);
   });
@@ -478,6 +486,15 @@ describe('PipelineStack', () => {
       return isRead && targetsGenerations;
     });
     expect(inventoryRead).toBeDefined();
+  });
+
+  test('Cleanup rescan schedule fires every 24 hours', () => {
+    // Publish 経由の SQS が万一 lost しても、24h 内に定期スケジュール経由で
+    // Cleanup が回るリカバリ経路が存在することを固定する。
+    template.hasResourceProperties('AWS::Scheduler::Schedule', {
+      Name: 'medical-access-lod-dev-cleanup-rescan',
+      ScheduleExpression: 'rate(24 hours)',
+    });
   });
 });
 

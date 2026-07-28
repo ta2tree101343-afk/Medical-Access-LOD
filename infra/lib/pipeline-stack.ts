@@ -260,6 +260,36 @@ export class PipelineStack extends cdk.Stack {
     this.cleanupDlq = cleanupDlq;
     this.cleanupQueue = cleanupQueue;
 
+    // Cleanup 再走査スケジュール (24h 間隔)。
+    //
+    // Publish 経由の SQS 送信が届かなかったケース (Publish 完了直後に
+    // Cleanup Lambda が throttle されて lost した等) や、DELETING 中に
+    // 停止した世代の恒久リカバリ経路として、EventBridge Scheduler が
+    // 定期的に Cleanup Lambda を直接叩き catalog を再走査させる。
+    // 再走査は冪等 (mark_deleting は再入可能、DELETING は resume される)。
+    const cleanupRescanRole = new iam.Role(this, 'CleanupRescanRole', {
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+      description: 'EventBridge Scheduler が Cleanup Lambda を invoke するための role',
+    });
+    cleanupFn.grantInvoke(cleanupRescanRole);
+    new scheduler.CfnSchedule(this, 'CleanupRescanSchedule', {
+      name: `medical-access-lod-${props.envName}-cleanup-rescan`,
+      description: 'DELETING で残った世代 / lost な SQS メッセージの恒久リカバリ',
+      flexibleTimeWindow: { mode: 'OFF' },
+      scheduleExpression: 'rate(24 hours)',
+      target: {
+        arn: cleanupFn.functionArn,
+        roleArn: cleanupRescanRole.roleArn,
+        // trigger_run_id は SFN 経由と区別できるよう "rescan-scheduled" を渡す。
+        input: JSON.stringify({
+          trigger_run_id: 'rescan-scheduled',
+          read_model_table: props.readModelTable.tableName,
+          inventory_bucket: props.buildBucket.bucketName,
+          dist_bucket: props.distBucket.bucketName,
+        }),
+      },
+    });
+
     // Step Functions
     //
     // 各 Lambda の入力仕様 (Pydantic) は src/medical_access_lod/functions/shared/events.py
