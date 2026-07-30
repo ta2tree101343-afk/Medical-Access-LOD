@@ -81,6 +81,25 @@ export class IdentityStack extends cdk.Stack {
       resources: [props.distributionArn],
     }));
 
+    // Smoke test の CFN Outputs 取得に必要。CDK deploy 自体は bootstrap role が
+    // 使うため deploy role には CFN 権限は不要だったが、deploy.yml 末尾で
+    // `aws cloudformation describe-stacks` で HttpApiUrl / DistributionId を
+    // 引くために describe/list 権限を与える。read-only。
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'cloudformation:DescribeStacks',
+        'cloudformation:ListStacks',
+      ],
+      resources: [`arn:aws:cloudformation:*:${this.account}:stack/MedicalAccessLod-*/*`],
+    }));
+
+    // Smoke test で `aws cloudfront wait distribution-deployed` を叩くため
+    // (現在 Deployed 状態かどうかポーリングする)。GetDistribution は read-only。
+    this.deployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['cloudfront:GetDistribution'],
+      resources: [props.distributionArn],
+    }));
+
     // deploy.yml の `aws s3 sync lod/ s3://.../latest/` に必要な権限。
     // 書き込み系 (PutObject / DeleteObject / GetObject) は `latest/*` に限定し、
     // `releases/` や `archives/` は改変させない。ListBucket も `s3:prefix`
