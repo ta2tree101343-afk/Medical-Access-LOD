@@ -117,10 +117,22 @@ Medical-Access-LOD/
 
 - Storage (S3 × 3 + DynamoDB + ECR)
 - Delivery (S3 dist + CloudFront OAC)
-- Pipeline (Lambda × 6 + Step Functions + EventBridge Scheduler)
+- Pipeline (Lambda × 7 + Step Functions + EventBridge Scheduler × 2 + SQS + Cleanup DLQ)
 - Api (API Gateway HTTP + Lambda)
-- Monitoring (CloudWatch alarms × 15 + SNS + Dashboard)
-- Identity (GitHub OIDC Provider + Deploy Role)
+- Monitoring (CloudWatch alarms × 17 + SNS + Dashboard + AWS Budgets)
+- Identity (GitHub OIDC Provider + Deploy Role, immutable-ID 対応 trust condition)
+
+### デプロイ検証済み (2026-07-30, dev 環境)
+
+上記 CDK 定義は実 AWS 上で end-to-end デプロイ動作確認済み。GitHub Actions
+(`workflow_dispatch`) から OIDC → Docker build (arm64) → ECR push → CDK deploy →
+`aws s3 sync` → CloudFront invalidation → smoke test まで自動化されている。
+Step Functions を手動起動して実データ 897 施設 / 25,278 items を DynamoDB へ
+投入するところまで検証。実デプロイで踏んだ罠 7 件 (OIDC subject の immutable ID、
+buildx の OCI attestation、IAM description の ASCII 制約、Lambda コンテナ内の
+パス解決、Deploy Role の IAM 権限、CloudFront 初回伝播遅延) は
+[`infra/README.md#troubleshooting-実デプロイで踏んだ罠-2026-07-30-記録`](infra/README.md) に
+症状 / 原因 / 修正を記録している。
 
 ## ライセンス
 
