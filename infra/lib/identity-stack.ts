@@ -34,8 +34,15 @@ export class IdentityStack extends cdk.Stack {
       StringEquals: {
         'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
       },
+      // GitHub OIDC subject claim には 2 形式ある:
+      //   - classic : `repo:OWNER/REPO:environment:ENV`
+      //   - immutable ID (org/enterprise が有効化): `repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:ENV`
+      // wildcard 位置を owner / repo の直後に置くことで両方カバーする。
+      // (`OWNER/REPO:*` だけだと `@ID` 付きに一致せず sts:AssumeRoleWithWebIdentity が
+      //  AccessDenied になる — 2026-07 の初回 deploy でこれを踏んで CloudTrail の
+      //  WebIdentityUser principalId で判明した)
       StringLike: {
-        'token.actions.githubusercontent.com:sub': `repo:${props.githubOwner}/${props.githubRepo}:*`,
+        'token.actions.githubusercontent.com:sub': `repo:${props.githubOwner}*/${props.githubRepo}*:*`,
       },
     };
 

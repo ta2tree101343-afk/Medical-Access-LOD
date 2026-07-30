@@ -581,7 +581,10 @@ describe('IdentityStack', () => {
             Principal: Match.objectLike({ Federated: Match.anyValue() }),
             Condition: Match.objectLike({
               StringLike: Match.objectLike({
-                'token.actions.githubusercontent.com:sub': Match.stringLikeRegexp('repo:test-owner/test-repo:\\*'),
+                // GitHub の immutable ID 付き subject (`OWNER@ID/REPO@ID:...`) と
+                // classic (`OWNER/REPO:...`) の両方を許容するため、
+                // owner / repo の直後に `*` を挟む。
+                'token.actions.githubusercontent.com:sub': Match.stringLikeRegexp('repo:test-owner\\*/test-repo\\*:\\*'),
               }),
             }),
           }),
