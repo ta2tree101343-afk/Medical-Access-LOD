@@ -90,8 +90,16 @@ jobs:
           # 通常の `docker build` + `docker push` の 2 段だと buildx builder が
           # daemon に image を load しないため push が失敗する。buildx build --push
           # が multi-platform / cross-arch build 時の推奨。
+          #
+          # --provenance=false --sbom=false は AWS Lambda 対策。
+          # buildx は既定で OCI manifest index + provenance attestation を作るが、
+          # Lambda は Docker Image Manifest V2 Schema 2 のみ受け付けるため、
+          # 「image manifest, config or layer media type ... is not supported」で
+          # 落ちる。attestation を無効化して単一 manifest を push する。
           docker buildx build \
             --platform linux/arm64 \
+            --provenance=false \
+            --sbom=false \
             -t "$REPO:$COMMIT_SHA" \
             -t "$REPO:latest" \
             --push \
