@@ -269,12 +269,15 @@ export class PipelineStack extends cdk.Stack {
     // 再走査は冪等 (mark_deleting は再入可能、DELETING は resume される)。
     const cleanupRescanRole = new iam.Role(this, 'CleanupRescanRole', {
       assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
-      description: 'EventBridge Scheduler が Cleanup Lambda を invoke するための role',
+      // IAM Role description は ASCII + Latin-1 (0x20-0x7E, 0xA1-0xFF) のみ許容。
+      // 日本語 (CJK) は 0x3000+ で範囲外のため使えない。ここは英語で固定する。
+      description: 'EventBridge Scheduler assumes this role to invoke the Cleanup Lambda for periodic rescan.',
     });
     cleanupFn.grantInvoke(cleanupRescanRole);
     new scheduler.CfnSchedule(this, 'CleanupRescanSchedule', {
       name: `medical-access-lod-${props.envName}-cleanup-rescan`,
-      description: 'DELETING で残った世代 / lost な SQS メッセージの恒久リカバリ',
+      // EventBridge Scheduler description は ASCII のみ安全側で使う。
+      description: 'Periodic rescan of orphan DELETING generations and lost SQS messages recovery.',
       flexibleTimeWindow: { mode: 'OFF' },
       scheduleExpression: 'rate(24 hours)',
       target: {
