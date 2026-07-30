@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as cw from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
@@ -16,6 +17,10 @@ export interface MonitoringStackProps extends cdk.StackProps {
   cleanupFunction: lambda.Function;
   /** Cleanup DLQ。メッセージ滞留アラーム用 (再配信 3 回失敗 = 運用者に届く)。 */
   cleanupDlq: sqs.Queue;
+  /** 月次 Budget の閾値 (USD)。default 10 USD で個人利用の想定超過を検知。 */
+  monthlyBudgetUsd?: number;
+  /** Budget アラート通知先 (メール)。未指定なら Budget は作成しない。 */
+  budgetEmail?: string;
 }
 
 export class MonitoringStack extends cdk.Stack {
@@ -137,8 +142,70 @@ export class MonitoringStack extends cdk.Stack {
             width: 12,
           }),
         ],
+        [
+          new cw.GraphWidget({
+            title: 'Cleanup Lambda (errors / duration)',
+            left: [
+              props.cleanupFunction.metricErrors({ period: cdk.Duration.minutes(5) }),
+            ],
+            right: [
+              props.cleanupFunction.metricDuration({ period: cdk.Duration.minutes(5), statistic: 'p95' }),
+            ],
+            width: 12,
+          }),
+          new cw.GraphWidget({
+            title: 'Cleanup DLQ (visible / in-flight)',
+            left: [
+              props.cleanupDlq.metricApproximateNumberOfMessagesVisible({
+                period: cdk.Duration.minutes(5),
+              }),
+              props.cleanupDlq.metricApproximateNumberOfMessagesNotVisible({
+                period: cdk.Duration.minutes(5),
+              }),
+            ],
+            width: 12,
+          }),
+        ],
       ],
     });
+
+    // 月次 Budget アラーム。default $10。想定外の課金 (ECR / DynamoDB / CloudFront)
+    // を早期検知する。CloudWatch Alarm ではなく AWS Budgets を使う理由:
+    // Budgets は請求データを日次で評価し、当月 forecast も監視できる。
+    const budgetEmail = props.budgetEmail;
+    if (budgetEmail) {
+      new budgets.CfnBudget(this, 'MonthlyBudget', {
+        budget: {
+          budgetName: `medical-access-lod-${props.envName}-monthly`,
+          budgetType: 'COST',
+          timeUnit: 'MONTHLY',
+          budgetLimit: {
+            amount: props.monthlyBudgetUsd ?? 10,
+            unit: 'USD',
+          },
+        },
+        notificationsWithSubscribers: [
+          {
+            notification: {
+              notificationType: 'ACTUAL',
+              comparisonOperator: 'GREATER_THAN',
+              threshold: 80,
+              thresholdType: 'PERCENTAGE',
+            },
+            subscribers: [{ subscriptionType: 'EMAIL', address: budgetEmail }],
+          },
+          {
+            notification: {
+              notificationType: 'FORECASTED',
+              comparisonOperator: 'GREATER_THAN',
+              threshold: 100,
+              thresholdType: 'PERCENTAGE',
+            },
+            subscribers: [{ subscriptionType: 'EMAIL', address: budgetEmail }],
+          },
+        ],
+      });
+    }
 
     new cdk.CfnOutput(this, 'AlertTopicArn', { value: this.alertTopic.topicArn });
   }

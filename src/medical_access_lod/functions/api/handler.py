@@ -185,17 +185,53 @@ def list_facilities() -> dict[str, Any]:
             return {"items": [], "count": 0, "error": f"invalid time: {time_raw!r}"}
 
     generation = _active_generation()
-    response = _table().query(
+    table = _table()
+
+    # 基本の候補集合 (city × specialty) は GSI1 で取る。
+    base = table.query(
         IndexName="GSI1_CityBySpecialty",
         KeyConditionExpression=Key("GSI1PK").eq(_city_pk(city, generation))
         & Key("GSI1SK").begins_with(f"SPECIALTY#{specialty}#"),
     )
-    items = response.get("Items", [])
+    items: list[dict[str, Any]] = base.get("Items", [])
 
-    # day/time 指定時は、該当施設に条件を満たす SCHEDULE があるか確認する。
-    # 時刻比較は SPARQL 側と同じく文字列 (STR) 比較で行う (HH:MM:SS 24 時制で辞書順 = 時刻順)。
-    if day or time_norm:
-        table = _table()
+    if day is not None:
+        # day 指定時は GSI2 (SPECIALTY#code#DAY#day) を **一発** で叩く。
+        # SCHEDULE items に city / facility_id が明示属性として乗っているので、
+        # 施設ごとに追加 Query を撃つ N+1 を回避できる。
+        gsi2_pk = _specialty_day_pk(specialty, day, generation)
+        sched_resp = table.query(
+            IndexName="GSI2_SpecialtyByDay",
+            KeyConditionExpression=Key("GSI2PK").eq(gsi2_pk),
+        )
+        matched_fids: set[str] = set()
+        for sched in sched_resp.get("Items", []):
+            # `city` は A1 で追加した明示属性。旧世代 (attribute 未書込) は None を
+            # 返す。この時点で GSI1 側 (基本の候補集合) が既に city で絞り込まれて
+            # おり、facility_id の交差で最終フィルタするので、None は「city ミス
+            # マッチではなく単に旧世代」として素通しさせる。
+            # 一方で city 属性が存在するのに値が違うものは、確実にクロスシティ流入
+            # なので排除する (GSI2PK は city を含まないため必要な防御)。
+            sched_city = sched.get("city")
+            if sched_city is not None and sched_city != city:
+                continue
+            if time_norm is not None:
+                opens = sched.get("opens")
+                closes = sched.get("closes")
+                if not (isinstance(opens, str) and isinstance(closes, str)):
+                    continue
+                # 時刻比較は SPARQL §13.3 と同じ文字列 (STR) 比較。
+                # HH:MM:SS 24 時制なら辞書順 == 時刻順。
+                if not (opens <= time_norm < closes):
+                    continue
+            fid = sched.get("facility_id")
+            if isinstance(fid, str):
+                matched_fids.add(fid)
+        items = [it for it in items if _facility_id_from_pk(it.get("PK")) in matched_fids]
+
+    elif time_norm is not None:
+        # time のみ指定時は day を絞れないため候補ごとに SCHEDULE を追加取得する。
+        # 通常 UI は day+time で来るので N+1 になるのはこのパスのみ。
         filtered: list[dict[str, Any]] = []
         for item in items:
             pk = item.get("PK")
@@ -206,20 +242,33 @@ def list_facilities() -> dict[str, Any]:
                 & Key("SK").begins_with(f"SCHEDULE#{specialty}#"),
             )
             for sched in resp.get("Items", []):
-                if day and sched.get("day_of_week") != day:
+                opens = sched.get("opens")
+                closes = sched.get("closes")
+                if not (isinstance(opens, str) and isinstance(closes, str)):
                     continue
-                opens = sched.get("opens", "")
-                closes = sched.get("closes", "")
-                if time_norm:
-                    if not (isinstance(opens, str) and isinstance(closes, str)):
-                        continue
-                    if not (opens <= time_norm < closes):
-                        continue
-                filtered.append(item)
-                break
+                if opens <= time_norm < closes:
+                    filtered.append(item)
+                    break
         items = filtered
 
     return {"items": items, "count": len(items)}
+
+
+def _specialty_day_pk(specialty: str, day: str, generation: str | None) -> str:
+    if generation is None:
+        return f"SPECIALTY#{specialty}#DAY#{day}"
+    return f"GENERATION#{generation}#SPECIALTY#{specialty}#DAY#{day}"
+
+
+def _facility_id_from_pk(pk: Any) -> str | None:
+    """PK (`GENERATION#<gen>#FACILITY#<fid>` または `FACILITY#<fid>`) から fid を取り出す。"""
+    if not isinstance(pk, str):
+        return None
+    marker = "FACILITY#"
+    idx = pk.rfind(marker)
+    if idx < 0:
+        return None
+    return pk[idx + len(marker):]
 
 
 @app.get("/facilities/<facility_id>")

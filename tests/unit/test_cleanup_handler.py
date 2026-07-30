@@ -182,6 +182,53 @@ def test_cleanup_accepts_sqs_records(cleanup_env: None, monkeypatch: pytest.Monk
     assert result["deleted_generations"] == 0
 
 
+def test_cleanup_collects_orphan_staged_generation(
+    cleanup_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """staged_ttl_hours を超えた STAGED (BuildReadModel 失敗残骸) を Cleanup が回収する。
+
+    A2 の回帰防止 pin: retention に STAGED を渡さないと死コードになる。
+    """
+    import time as _time
+
+    keys = _generation_keys("orphan", 2)
+    ddb_table = boto3.resource("dynamodb", region_name=REGION).Table(TABLE)
+    with ddb_table.batch_writer() as batch:
+        for pk, sk in keys:
+            batch.put_item(Item={"PK": pk, "SK": sk, "generation": "orphan"})
+    prefix = "generations/orphan/inventory/"
+    generation_inventory.write_inventory(BUILD_BUCKET, prefix, iter(keys), run_id="orphan")
+    generation_catalog.register_staged(
+        TABLE,
+        "orphan",
+        snapshot_date="2025-12-01",
+        inventory_prefix=prefix,
+        item_count=len(keys),
+    )
+    # register_staged が書き込む staged_at を 48h 前に上書きする (TTL 24h 超え)
+    # catalog は PK=SYSTEM#GENERATION / SK=RUN#<run_id> のスキーマ。
+    now_epoch = int(_time.time())
+    ddb_table.update_item(
+        Key={"PK": "SYSTEM#GENERATION", "SK": "RUN#orphan"},
+        UpdateExpression="SET staged_at = :s",
+        ExpressionAttributeValues={":s": now_epoch - 48 * 3_600},
+    )
+
+    # active manifest 側は正常な COMMITTED 世代
+    _seed_generation("active", _generation_keys("active", 1))
+    _put_manifest("active")
+
+    # STAGED_TTL を 1h に、keep_last_n=1 / min_age=0 に絞って orphan が確実に対象になるようにする
+    monkeypatch.setenv("RETENTION_STAGED_TTL_HOURS", "1")
+    monkeypatch.setenv("RETENTION_KEEP_LAST_N", "1")
+    monkeypatch.setenv("RETENTION_MIN_AGE_DAYS", "0")
+
+    result = _invoke(_basic_event("active"))
+    assert "orphan" in result["deleted_run_ids"]  # type: ignore[operator]
+    entry = generation_catalog.get(TABLE, "orphan")
+    assert entry is not None and entry["status"] == "DELETED"
+
+
 def test_cleanup_resumes_interrupted_deleting_generation(cleanup_env: None) -> None:
     """途中で落ちて DELETING で残った世代を、retention に関係なく再削除する。"""
     _seed_generation("crashed-run", _generation_keys("crashed-run", 2))

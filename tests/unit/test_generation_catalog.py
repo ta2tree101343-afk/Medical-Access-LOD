@@ -134,11 +134,19 @@ def test_mark_deleting_is_idempotent(catalog_env: str) -> None:
     generation_catalog.mark_deleting(catalog_env, "run-A")
 
 
-def test_mark_deleting_rejects_staged(catalog_env: str) -> None:
-    """未完了 (STAGED) の世代を Cleanup 対象にしてはならない。"""
+def test_mark_deleting_allows_staged_transition(catalog_env: str) -> None:
+    """A2: STAGED → DELETING 遷移を許可する。
+
+    以前は「未完了 (STAGED) は Cleanup 対象外」として reject していたが、
+    BuildReadModel の失敗で残る孤立 STAGED を staged_ttl_hours 超過で回収するには
+    STAGED → DELETING の遷移が必要 (retention 側で TTL 判定した上で呼ばれる)。
+    """
     _register(catalog_env, "run-A")
-    with pytest.raises(generation_catalog.GenerationCatalogConflictError):
-        generation_catalog.mark_deleting(catalog_env, "run-A")
+    # mark_committed を挟まずに直接 mark_deleting を呼ぶ (=STAGED から遷移)
+    generation_catalog.mark_deleting(catalog_env, "run-A")
+    entry = generation_catalog.get(catalog_env, "run-A")
+    assert entry is not None
+    assert entry["status"] == generation_catalog.GenerationStatus.DELETING.value
 
 
 def test_mark_deleting_raises_missing_when_not_registered(catalog_env: str) -> None:

@@ -71,9 +71,14 @@ def _load_retention_policy() -> generation_retention.RetentionPolicy:
         os.environ.get("RETENTION_MIN_AGE_DAYS")
         or str(generation_retention.DEFAULT_MIN_AGE_DAYS)
     )
+    staged_ttl_hours = int(
+        os.environ.get("RETENTION_STAGED_TTL_HOURS")
+        or str(generation_retention.DEFAULT_STAGED_TTL_HOURS)
+    )
     return generation_retention.RetentionPolicy(
         keep_last_n=keep_last_n,
         min_age_days=min_age_days,
+        staged_ttl_hours=staged_ttl_hours,
     )
 
 
@@ -297,8 +302,13 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     deleting = generation_catalog.list_by_status(
         request.read_model_table, generation_catalog.GenerationStatus.DELETING
     )
+    # STAGED も retention 判定に渡す。plan_deletions は staged_ttl_hours (default 24h)
+    # 超過の STAGED を回収する。渡し忘れると A2 (orphan STAGED cleanup) が死コード化する。
+    staged = generation_catalog.list_by_status(
+        request.read_model_table, generation_catalog.GenerationStatus.STAGED
+    )
     plan = generation_retention.plan_deletions(
-        committed + deleting,
+        committed + deleting + staged,
         active_run_id=active_run_id,
         policy=_load_retention_policy(),
     )
@@ -312,7 +322,8 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     )
 
     entries_by_run: dict[str, dict[str, Any]] = {
-        e["run_id"]: e for e in (committed + deleting) if isinstance(e.get("run_id"), str)
+        e["run_id"]: e for e in (committed + deleting + staged)
+        if isinstance(e.get("run_id"), str)
     }
 
     total_deleted_generations = 0

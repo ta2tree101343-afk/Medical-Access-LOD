@@ -19,7 +19,12 @@ export class IdentityStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: IdentityStackProps) {
     super(scope, id, props);
 
-    // Reuse if provider already exists in account; here we import.
+    // NOTE: OIDC Provider は AWS アカウント全体で 1 つしか作れない。
+    // このコードは new で作成するため、同一アカウントで dev/stg/prod の
+    // IdentityStack を全部 deploy すると 2 つ目以降で衝突する。
+    // 対処: 初回に dev で作成し、stg/prod では OpenIdConnectProvider.fromOpenIdConnectProviderArn(...)
+    // で import する分岐を導入する必要がある。詳細は infra/README.md
+    // 「stg / prod への横展開」セクション参照。現状は dev 想定。
     const provider = new iam.OpenIdConnectProvider(this, 'GithubOidcProvider', {
       url: 'https://token.actions.githubusercontent.com',
       clientIds: ['sts.amazonaws.com'],

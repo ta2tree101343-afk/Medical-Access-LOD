@@ -128,3 +128,50 @@ jobs:
           else
             echo "CLOUDFRONT_DISTRIBUTION_ID secret not set; skipping invalidation."
           fi
+
+      - name: Smoke test — API and dist bucket
+        env:
+          ENV_NAME: ${{ inputs.env }}
+        run: |
+          set -euo pipefail
+
+          # CFN Outputs から公開 URL を取得する。stack の Output キー名は
+          # infra/lib/{api,delivery}-stack.ts で定義済み。
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name "MedicalAccessLod-$ENV_NAME-Api" \
+            --query 'Stacks[0].Outputs[?OutputKey==`HttpApiUrl`].OutputValue' \
+            --output text)
+          DIST_DOMAIN=$(aws cloudformation describe-stacks \
+            --stack-name "MedicalAccessLod-$ENV_NAME-Delivery" \
+            --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomain`].OutputValue' \
+            --output text)
+          DIST_ID=$(aws cloudformation describe-stacks \
+            --stack-name "MedicalAccessLod-$ENV_NAME-Delivery" \
+            --query 'Stacks[0].Outputs[?OutputKey==`DistributionId`].OutputValue' \
+            --output text)
+
+          echo "API_URL=$API_URL"
+          echo "DIST_DOMAIN=$DIST_DOMAIN"
+          echo "DIST_ID=$DIST_ID"
+
+          # 1. /health は Read Model 未投入でも 200 を返す
+          curl --fail --show-error --silent \
+            --retry 5 --retry-delay 10 --retry-connrefused \
+            "$API_URL/health"
+
+          # 2. /metadata が 200 で PDL 1.0 を含む
+          curl --fail --show-error --silent \
+            "$API_URL/metadata" | grep -q "PDL 1.0"
+
+          # 3. CloudFront は初回デプロイで 15〜20 分伝播にかかる。curl だけの
+          #    リトライ (最大数分) では時間切れになるので、CFN 側で
+          #    Distribution が全 edge に配信済みになるまで明示的に待つ。
+          #    2 回目以降のデプロイでは即座に返る。
+          echo "Waiting for CloudFront distribution to be deployed (may take up to 20 minutes on first run)..."
+          aws cloudfront wait distribution-deployed --id "$DIST_ID"
+
+          curl --fail --show-error --silent --head \
+            --retry 5 --retry-delay 15 --retry-connrefused \
+            "https://$DIST_DOMAIN/latest/medical-access-lod.ttl"
+
+          echo "smoke tests passed"

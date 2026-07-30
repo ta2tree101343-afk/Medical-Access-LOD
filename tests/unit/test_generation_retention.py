@@ -104,8 +104,20 @@ def test_min_age_days_preserves_recent_by_time() -> None:
     assert "age" in plan.keep_reasons["new-one"]
 
 
-def test_staged_is_never_deleted() -> None:
-    entries = [_staged("stuck"), _committed("active", committed_at=NOW)]
+def test_staged_within_ttl_is_kept() -> None:
+    """staged_at からの経過が TTL 未満の STAGED は in-flight として保持。
+
+    NOTE: `staged_at` を **明示的に** NOW-1h に設定する。旧テストは `_staged()`
+    が staged_at を持たなかったため、「TTL 内」ではなく「staged_at 欠落」の
+    経路を偶然踏んでいた。同じ pass でも意味が違うので、この 2 パスを分けて
+    pin する。"""
+    stuck = {
+        "run_id": "stuck",
+        "status": "STAGED",
+        "snapshot_date": "2025-12-01",
+        "staged_at": NOW - 3_600,  # 1h 前 < default TTL 24h
+    }
+    entries = [stuck, _committed("active", committed_at=NOW)]
     plan = plan_deletions(
         entries,
         active_run_id="active",
@@ -114,6 +126,50 @@ def test_staged_is_never_deleted() -> None:
     )
     assert "stuck" not in plan.to_delete
     assert plan.keep_reasons["stuck"] == "status=STAGED (in-flight)"
+
+
+def test_staged_without_staged_at_is_kept_conservatively() -> None:
+    """staged_at を持たない STAGED は「不明」として保守側 (=保持)。
+
+    catalog 書き込みバグで staged_at が抜けた場合、silent に消すと復旧不能な
+    データロスを招く。運用としては CloudWatch ログ側で検知する前提。"""
+    entries = [_staged("missing"), _committed("active", committed_at=NOW)]
+    plan = plan_deletions(
+        entries,
+        active_run_id="active",
+        policy=RetentionPolicy(keep_last_n=1, min_age_days=0, staged_ttl_hours=1),
+        now=NOW,
+    )
+    assert "missing" not in plan.to_delete
+    assert plan.keep_reasons["missing"] == "status=STAGED (in-flight)"
+
+
+def test_retention_policy_rejects_bad_staged_ttl() -> None:
+    """staged_ttl_hours < 1 は __post_init__ で ValueError。"""
+    with pytest.raises(ValueError, match="staged_ttl_hours"):
+        RetentionPolicy(staged_ttl_hours=0)
+    with pytest.raises(ValueError, match="staged_ttl_hours"):
+        RetentionPolicy(staged_ttl_hours=-1)
+    # 1h は許容
+    RetentionPolicy(staged_ttl_hours=1)
+
+
+def test_staged_expired_is_collected() -> None:
+    """staged_at から staged_ttl_hours を超えた STAGED は孤立世代として回収する。"""
+    entry = {
+        "run_id": "orphan",
+        "status": "STAGED",
+        "snapshot_date": "2025-12-01",
+        # staged_at を 48h 前に設定 (default TTL 24h を超過)
+        "staged_at": NOW - 48 * 3_600,
+    }
+    plan = plan_deletions(
+        [entry, _committed("active", committed_at=NOW)],
+        active_run_id="active",
+        policy=RetentionPolicy(keep_last_n=1, min_age_days=0, staged_ttl_hours=24),
+        now=NOW,
+    )
+    assert "orphan" in plan.to_delete
 
 
 def test_deleted_is_never_re_deleted() -> None:

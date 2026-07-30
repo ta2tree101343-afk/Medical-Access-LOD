@@ -140,14 +140,24 @@ def extract_state_machine_definition(template: dict[str, Any]) -> ExtractedState
 
 
 def extract_scheduler_input(template: dict[str, Any]) -> dict[str, Any]:
+    # 半期スナップショット取り込みの biannual schedule 入力を取り出す。
+    # cleanup-rescan schedule も同じ CFN Type を作るため、Name / expression で識別する。
     schedules = [
         resource
         for resource in template.get("Resources", {}).values()
         if resource.get("Type") == "AWS::Scheduler::Schedule"
     ]
-    if len(schedules) != 1:
-        raise LookupError(f"Expected one Scheduler resource, found {len(schedules)}")
-    raw_input = schedules[0]["Properties"]["Target"]["Input"]
+    biannual = [
+        s for s in schedules
+        if isinstance(s["Properties"].get("Name"), str)
+        and "biannual" in s["Properties"]["Name"]
+    ]
+    if len(biannual) != 1:
+        raise LookupError(
+            f"Expected exactly one biannual Scheduler resource, found {len(biannual)} "
+            f"(total schedules: {len(schedules)})"
+        )
+    raw_input = biannual[0]["Properties"]["Target"]["Input"]
     if not isinstance(raw_input, str):
         raise TypeError("Scheduler Target.Input must synthesize to a JSON string")
     result = json.loads(raw_input)

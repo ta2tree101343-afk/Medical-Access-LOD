@@ -184,11 +184,13 @@ def list_by_status(table: str, status: GenerationStatus) -> list[dict[str, Any]]
 
 
 def mark_deleting(table: str, run_id: str) -> None:
-    """COMMITTED 状態の世代を DELETING へ遷移させる。
+    """COMMITTED / STAGED (TTL 超過孤立) 状態の世代を DELETING へ遷移させる。
 
     Cleanup Lambda が削除を開始する直前に呼ぶ。既に DELETING/DELETED である
-    場合は冪等成功として扱う (SQS 再配信対応)。COMMITTED でも DELETING/DELETED
-    でもない状態 (STAGED) は Cleanup の対象になってはならないため Conflict。
+    場合は冪等成功として扱う (SQS 再配信対応)。
+    STAGED も許可するのは、BuildReadModel が途中失敗して残った孤立世代を
+    retention 側で TTL 判定して回収するため (A2)。retention は staged_ttl_hours
+    未満の STAGED を対象外にするので、ここに来る STAGED は必ず孤立確定である。
     """
 
     if not run_id:
@@ -202,11 +204,12 @@ def mark_deleting(table: str, run_id: str) -> None:
                 "SET #status = :deleting, "
                 "deleting_at = if_not_exists(deleting_at, :now)"
             ),
-            ConditionExpression="#status IN (:committed, :deleting, :deleted)",
+            ConditionExpression="#status IN (:committed, :staged, :deleting, :deleted)",
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues={
                 ":deleting": GenerationStatus.DELETING.value,
                 ":committed": GenerationStatus.COMMITTED.value,
+                ":staged": GenerationStatus.STAGED.value,
                 ":deleted": GenerationStatus.DELETED.value,
                 ":now": now,
             },
