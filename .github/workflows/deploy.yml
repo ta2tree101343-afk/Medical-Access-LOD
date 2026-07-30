@@ -57,6 +57,20 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076
 
+      # arm64 クロスビルド用の QEMU emulation を有効化する (runner は amd64)。
+      # これがないと `docker build --platform linux/arm64` の RUN 段で
+      # `exec /bin/sh: exec format error` が出る。
+      # docker/setup-qemu-action v3.2.0
+      - name: Set up QEMU (for arm64 cross-build)
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf
+        with:
+          platforms: arm64
+
+      # buildx builder を有効化 (multi-platform build に必須)
+      # docker/setup-buildx-action v3.7.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349
+
       - name: Build and push Docker image
         id: build
         env:
@@ -72,9 +86,16 @@ jobs:
           # Lambda が更新される。
           # `latest` は人間向けのタグとして併記して push する (Lambda は参照しない)。
           REPO="$REGISTRY/medical-access-lod-$ENV_NAME-pipeline"
-          docker build --platform linux/arm64 -t "$REPO:$COMMIT_SHA" -t "$REPO:latest" .
-          docker push "$REPO:$COMMIT_SHA"
-          docker push "$REPO:latest"
+          # buildx で 1 発 build & push。--platform 指定と --push を組み合わせるとき
+          # 通常の `docker build` + `docker push` の 2 段だと buildx builder が
+          # daemon に image を load しないため push が失敗する。buildx build --push
+          # が multi-platform / cross-arch build 時の推奨。
+          docker buildx build \
+            --platform linux/arm64 \
+            -t "$REPO:$COMMIT_SHA" \
+            -t "$REPO:latest" \
+            --push \
+            .
           echo "image_tag=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
 
       # actions/setup-node v4.1.0
