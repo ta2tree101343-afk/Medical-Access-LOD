@@ -141,10 +141,23 @@ jobs:
         env:
           ENV_NAME: ${{ inputs.env }}
         run: |
-          aws s3 sync lod/ "s3://medical-access-lod-$ENV_NAME-dist/latest/" \
+          BUCKET="s3://medical-access-lod-${ENV_NAME}-dist/latest/"
+          aws s3 sync lod/ "$BUCKET" \
             --cache-control "public, max-age=3600" \
             --exclude "manifest.json" \
-            --exclude "*.md"
+            --exclude "*.md" \
+            --exclude "*.ttl" \
+            --exclude "*.jsonld"
+          aws s3 sync lod/ "$BUCKET" \
+            --cache-control "public, max-age=3600" \
+            --exclude "*" \
+            --include "*.ttl" \
+            --content-type "text/turtle; charset=utf-8"
+          aws s3 sync lod/ "$BUCKET" \
+            --cache-control "public, max-age=3600" \
+            --exclude "*" \
+            --include "*.jsonld" \
+            --content-type "application/ld+json; charset=utf-8"
 
       - name: Invalidate CloudFront cache
         env:
